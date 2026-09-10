@@ -1,3 +1,13 @@
+def _klippy_path():
+    import os
+    import sys
+    here = os.path.dirname(__file__)
+    klippy_dir = os.path.join(here, "klipper_vendor", "klippy")
+    if klippy_dir not in sys.path:
+        sys.path.insert(0, klippy_dir)
+    return klippy_dir
+
+
 def probe_serial(path, baud=115200):
     """Harmlessly prove embedded Python + pySerial can exclusively open a PTY."""
     import serial
@@ -22,15 +32,62 @@ def probe_c_helper(path):
 
 def probe_klipper_import():
     """Import Klipper core host modules without connecting to a printer."""
-    import os
-    import sys
-    here = os.path.dirname(__file__)
-    klippy_dir = os.path.join(here, "klipper_vendor", "klippy")
-    if klippy_dir not in sys.path:
-        sys.path.insert(0, klippy_dir)
+    _klippy_path()
     import klippy  # noqa: F401
     import reactor  # noqa: F401
     import serialhdl  # noqa: F401
     import mcu  # noqa: F401
     import toolhead  # noqa: F401
     return "Klipper imports OK"
+
+
+def probe_mcu_identify(path, c_helper_path, baud=115200):
+    """Run only Klipper's MCU identify handshake, then disconnect.
+
+    This loads the same SerialReader/c_helper code used by Klippy but never
+    sends a printer configuration, motion, heater, or GPIO command.
+    """
+    import os
+    os.environ["ANDROID_KLIPPER_CHELPER"] = c_helper_path
+    _klippy_path()
+
+    import reactor
+    import serialhdl
+
+    r = reactor.Reactor()
+    result = {}
+    serial_reader = None
+
+    def connect(eventtime):
+        nonlocal serial_reader
+        try:
+            serial_reader = serialhdl.SerialReader(r, mcu_name="android-probe")
+            serial_reader.connect_uart(path, int(baud))
+            parser = serial_reader.get_msgparser()
+            version, build = parser.get_version_info()
+            constants = parser.get_constants()
+            result["version"] = str(version)
+            result["build"] = str(build)
+            result["mcu"] = str(constants.get("MCU", "unknown"))
+            result["clock"] = str(constants.get("CLOCK_FREQ", "unknown"))
+            result["commands"] = str(len(parser.get_messages()))
+        except BaseException as exc:
+            result["error"] = "%s: %s" % (type(exc).__name__, exc)
+        finally:
+            if serial_reader is not None:
+                try:
+                    serial_reader.disconnect()
+                except BaseException:
+                    pass
+            r.end()
+        return r.NEVER
+
+    r.register_callback(connect)
+    try:
+        r.run()
+    finally:
+        r.finalize()
+
+    if "error" in result:
+        raise RuntimeError(result["error"])
+    return "Klipper identify OK: MCU={mcu}, {commands} commands, {version}".format(**result)
