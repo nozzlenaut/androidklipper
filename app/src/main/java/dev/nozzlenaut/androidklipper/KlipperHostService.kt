@@ -44,11 +44,11 @@ class KlipperHostService : Service() {
 
         if (!Python.isStarted()) Python.start(AndroidPlatform(this))
         val hostprobe = Python.getInstance().getModule("hostprobe")
+        val helper = File(applicationInfo.nativeLibraryDir, "libklipper_c_helper.so")
         val statusLines = mutableListOf<String>()
 
         try {
             statusLines += hostprobe.callAttr("probe_klipper_import").toString()
-            val helper = File(applicationInfo.nativeLibraryDir, "libklipper_c_helper.so")
             statusLines += hostprobe.callAttr("probe_c_helper", helper.absolutePath).toString()
         } catch (t: Throwable) {
             statusLines += "Host runtime ERROR ${t.javaClass.simpleName}: ${t.message}"
@@ -77,12 +77,24 @@ class KlipperHostService : Service() {
                 session.start()
                 sessions += session
 
-                val probeResult = hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
+                val serialProbe = hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
+                val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
+                    hostprobe.callAttr(
+                        "probe_mcu_identify",
+                        pty.slavePath,
+                        helper.absolutePath,
+                        115200
+                    ).toString()
+                } else {
+                    "Klipper identify skipped: unknown serial device"
+                }
+
                 statusLines += buildString {
                     append("MCU ${index + 1}: ${device.productName ?: driver.javaClass.simpleName}\n")
                     append("  id: $stableId\n")
                     append("  PTY: ${pty.slavePath}\n")
-                    append("  Python: $probeResult")
+                    append("  Python: $serialProbe\n")
+                    append("  Protocol: $identifyProbe")
                 }
             } catch (t: Throwable) {
                 statusLines += "${device.productName ?: device.deviceName}: ERROR ${t.javaClass.simpleName}: ${t.message}"
