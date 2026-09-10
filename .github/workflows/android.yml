@@ -54,6 +54,9 @@ jobs:
       - name: Unit tests and debug APK
         run: gradle --stacktrace :app:testDebugUnitTest :app:assembleDebug
 
+      - name: Inspect packaged APK
+        run: bash scripts/inspect-apk.sh
+
       - uses: actions/upload-artifact@v4
         with:
           name: androidklipper-debug-apk
