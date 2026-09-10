@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+.externalNativeBuild/
+.cxx/
+vendor/klipper/
+*.apk
+*.aab
+app/src/main/python/klipper_vendor/
