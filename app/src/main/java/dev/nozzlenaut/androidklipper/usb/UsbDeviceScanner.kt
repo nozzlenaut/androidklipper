@@ -8,14 +8,17 @@ import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialProber
 
 object UsbDeviceScanner {
-    private const val KLIPPER_VID = 0x1d50
-    private const val KLIPPER_PID = 0x614e
+    const val KLIPPER_VID = 0x1d50
+    const val KLIPPER_PID = 0x614e
 
     private val klipperProber: UsbSerialProber by lazy {
         val table = ProbeTable()
         table.addProduct(KLIPPER_VID, KLIPPER_PID, CdcAcmSerialDriver::class.java)
         UsbSerialProber(table)
     }
+
+    fun isLikelyKlipper(device: UsbDevice): Boolean =
+        device.vendorId == KLIPPER_VID && device.productId == KLIPPER_PID
 
     fun probe(device: UsbDevice): UsbSerialDriver? =
         klipperProber.probeDevice(device) ?: UsbSerialProber.getDefaultProber().probeDevice(device)
