@@ -32,6 +32,10 @@ if(EXISTS "${KLIPPER_CHELPER_DIR}/pyhelper.c")
     )
     target_include_directories(klipper_c_helper PRIVATE ${KLIPPER_CHELPER_DIR})
     target_compile_options(klipper_c_helper PRIVATE -O2 -fPIC)
+    # Klipper's helper uses libm functions. pthread/dl APIs are provided by
+    # Android's bionic libc, but math is kept explicit so NDK link behavior is
+    # deterministic across ARMv7 and ARM64.
+    target_link_libraries(klipper_c_helper PRIVATE m)
     set_target_properties(klipper_c_helper PROPERTIES OUTPUT_NAME "klipper_c_helper")
 else()
     message(FATAL_ERROR "Pinned Klipper source missing. Run scripts/vendor-klipper.sh before building.")
