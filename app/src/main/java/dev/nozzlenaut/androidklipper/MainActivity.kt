@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -17,6 +19,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
 
@@ -42,8 +45,14 @@ class MainActivity : Activity() {
             textSize = 22f
             gravity = Gravity.CENTER_HORIZONTAL
         }
+        val safety = TextView(this).apply {
+            text = "Safe diagnostic build: the Klipper protocol test only identifies MCUs. It does not configure motion, heaters, fans, or GPIO."
+            textSize = 14f
+            setPadding(0, 16, 0, 8)
+        }
         status = TextView(this).apply {
-            text = "Plug the printer into USB OTG, then scan."
+            text = HostStatusStore.load(this@MainActivity)
+                ?: "Plug the printer into USB OTG, then scan."
             textSize = 15f
             setPadding(0, 24, 0, 24)
         }
@@ -55,6 +64,10 @@ class MainActivity : Activity() {
             text = "Grant USB access and start host test"
             setOnClickListener { requestUsbPermissionsAndStart() }
         }
+        val copy = Button(this).apply {
+            text = "Copy diagnostic report"
+            setOnClickListener { copyReport() }
+        }
         val stop = Button(this).apply {
             text = "Stop host test"
             setOnClickListener {
@@ -64,23 +77,26 @@ class MainActivity : Activity() {
         }
 
         root.addView(heading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.addView(safety, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(scan)
         root.addView(test)
+        root.addView(copy)
         root.addView(stop)
         setContentView(ScrollView(this).apply { addView(root) })
 
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 44)
         }
-        scanUsb()
+        if (HostStatusStore.load(this) == null) scanUsb()
     }
 
     override fun onStart() {
         super.onStart()
+        HostStatusStore.load(this)?.let { status.text = it }
         val filter = IntentFilter(KlipperHostService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
+            registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(statusReceiver, filter)
@@ -107,6 +123,13 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun copyReport() {
+        val report = HostStatusStore.load(this) ?: status.text.toString()
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("AndroidKlipper diagnostic", report))
+        Toast.makeText(this, "Diagnostic copied", Toast.LENGTH_SHORT).show()
     }
 
     private fun requestUsbPermissionsAndStart() {
