@@ -16,10 +16,14 @@ import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 
 class KlipperHostService : Service() {
     private val sessions = CopyOnWriteArrayList<UsbSerialSession>()
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
+    private val hostExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "androidklipper-host").apply { isDaemon = true }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -28,7 +32,9 @@ class KlipperHostService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, notification("Starting USB host test…"))
-        Thread({ rebuildSessions() }, "androidklipper-start").start()
+        // USB permission callbacks can arrive close together for multi-MCU printers.
+        // Serialize rebuilds so two service starts never fight over the same device.
+        hostExecutor.execute { rebuildSessions() }
         return START_STICKY
     }
 
@@ -101,22 +107,18 @@ class KlipperHostService : Service() {
     }
 
     private fun notification(text: String): Notification {
-        return if (Build.VERSION.SDK_INT >= 26) {
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
             Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("AndroidKlipper")
-                .setContentText(text)
-                .setSmallIcon(android.R.drawable.stat_sys_data_usb)
-                .setOngoing(true)
-                .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setContentTitle("AndroidKlipper")
-                .setContentText(text)
-                .setSmallIcon(android.R.drawable.stat_sys_data_usb)
-                .setOngoing(true)
-                .build()
         }
+        return builder
+            .setContentTitle("AndroidKlipper")
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_stat_androidklipper)
+            .setOngoing(true)
+            .build()
     }
 
     private fun createNotificationChannel() {
@@ -131,6 +133,7 @@ class KlipperHostService : Service() {
     override fun onDestroy() {
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
+        hostExecutor.shutdownNow()
         super.onDestroy()
     }
 
