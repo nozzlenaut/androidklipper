@@ -8,8 +8,14 @@ object ConfigRewriter {
         val usbSerialHint: String?
     )
 
-    private val sectionRegex = Regex("^\\s*\\[(mcu(?:\\s+[^]]+)?)\\]\\s*$", RegexOption.IGNORE_CASE)
-    private val serialRegex = Regex("^(\\s*)serial\\s*:\\s*(\\S+)\\s*$", RegexOption.IGNORE_CASE)
+    private val sectionRegex = Regex(
+        "^\\s*\\[(mcu(?:\\s+[^]]+)?)\\]\\s*(?:[#;].*)?$",
+        RegexOption.IGNORE_CASE
+    )
+    private val serialRegex = Regex(
+        "^(\\s*)serial\\s*:\\s*(\\S+)(\\s*(?:[#;].*)?)$",
+        RegexOption.IGNORE_CASE
+    )
     private val baudRegex = Regex("^\\s*baud\\s*:", RegexOption.IGNORE_CASE)
 
     fun extractUsbMcuRefs(text: String): List<McuRef> {
@@ -69,7 +75,9 @@ object ConfigRewriter {
             val serial = if (active != null) serialRegex.matchEntire(line) else null
             val target = active?.let { mapping[it] }
             if (serial != null && target != null) {
-                out += "${serial.groupValues[1]}serial: $target"
+                val indent = serial.groupValues[1]
+                val suffix = serial.groupValues[3]
+                out += "$indent" + "serial: $target" + suffix
                 rewrittenCurrentSection = true
             } else {
                 out += line
