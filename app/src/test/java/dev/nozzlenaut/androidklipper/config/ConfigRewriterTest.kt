@@ -1,6 +1,7 @@
 package dev.nozzlenaut.androidklipper.config
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,5 +39,49 @@ class ConfigRewriterTest {
         """.trimIndent()
         val rewritten = ConfigRewriter.rewriteForRuntime(source, mapOf("mcu toolhead" to "/dev/pts/4"))
         assertEquals(source, rewritten)
+    }
+
+    @Test
+    fun preservesInlineCommentsAndExistingBaud() {
+        val source = """
+            [mcu] # main controller
+            baud: 115200
+            serial: /dev/serial/by-id/usb-Klipper_stm32f446xx_ABC123-if00  # keep this note
+
+            [printer]
+            kinematics: corexy
+        """.trimIndent()
+
+        val refs = ConfigRewriter.extractUsbMcuRefs(source)
+        assertEquals(1, refs.size)
+        assertEquals("ABC123", refs.single().usbSerialHint)
+
+        val rewritten = ConfigRewriter.rewriteForRuntime(
+            source,
+            mapOf("mcu" to "/dev/pts/7")
+        )
+        assertTrue(rewritten.contains("serial: /dev/pts/7  # keep this note"))
+        assertEquals(1, Regex("baud: 115200").findAll(rewritten).count())
+        assertTrue(rewritten.contains("[mcu] # main controller"))
+    }
+
+    @Test
+    fun leavesUnmappedUsbMcuUntouched() {
+        val source = """
+            [mcu]
+            serial: /dev/serial/by-id/usb-Klipper_stm32f446xx_MAIN-if00
+
+            [mcu toolhead]
+            serial: /dev/serial/by-id/usb-Klipper_rp2040_TOOL-if00
+        """.trimIndent()
+
+        val rewritten = ConfigRewriter.rewriteForRuntime(
+            source,
+            mapOf("mcu" to "/dev/pts/8")
+        )
+        assertTrue(rewritten.contains("serial: /dev/pts/8"))
+        assertTrue(rewritten.contains("usb-Klipper_rp2040_TOOL-if00"))
+        assertEquals(1, Regex("baud: 115200").findAll(rewritten).count())
+        assertFalse(rewritten.contains("serial: /dev/pts/9"))
     }
 }
