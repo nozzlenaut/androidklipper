@@ -96,13 +96,21 @@ class KlipperHostService : Service() {
                 session.start()
                 sessions += session
 
-                val serialProbe = hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
-                val identifyProbe = hostprobe.callAttr(
-                    "probe_mcu_identify",
-                    pty.slavePath,
-                    helper.absolutePath,
-                    115200
-                ).toString()
+                val serialProbe = try {
+                    hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
+                } catch (t: Throwable) {
+                    "pySerial ERROR ${t.javaClass.simpleName}: ${t.message}"
+                }
+                val identifyProbe = try {
+                    hostprobe.callAttr(
+                        "probe_mcu_identify",
+                        pty.slavePath,
+                        helper.absolutePath,
+                        115200
+                    ).toString()
+                } catch (t: Throwable) {
+                    "Klipper identify ERROR ${t.javaClass.simpleName}: ${t.message}"
+                }
 
                 statusLines += buildString {
                     append("MCU ${index + 1}: ${device.productName ?: driver.javaClass.simpleName}\n")
