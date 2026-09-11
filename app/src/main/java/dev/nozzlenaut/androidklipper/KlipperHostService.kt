@@ -35,7 +35,9 @@ class KlipperHostService : Service() {
         // USB permission callbacks can arrive close together for multi-MCU printers.
         // Serialize rebuilds so two service starts never fight over the same device.
         hostExecutor.execute { rebuildSessions() }
-        return START_STICKY
+        // A diagnostic probe should never resurrect itself after Android kills it,
+        // especially after the USB device has been detached.
+        return START_NOT_STICKY
     }
 
     private fun rebuildSessions() {
@@ -49,49 +51,63 @@ class KlipperHostService : Service() {
 
         try {
             statusLines += hostprobe.callAttr("probe_klipper_import").toString()
+            statusLines += hostprobe.callAttr("probe_klipper_import_sweep").toString()
             statusLines += hostprobe.callAttr("probe_c_helper", helper.absolutePath).toString()
         } catch (t: Throwable) {
             statusLines += "Host runtime ERROR ${t.javaClass.simpleName}: ${t.message}"
         }
 
-        val supported = usbManager.deviceList.values.mapNotNull { device ->
-            val driver = UsbDeviceScanner.probe(device) ?: return@mapNotNull null
-            if (!usbManager.hasPermission(device)) {
-                statusLines += "${device.productName ?: device.deviceName}: waiting for USB permission"
-                return@mapNotNull null
-            }
-            device to driver
+        val allDevices = usbManager.deviceList.values.toList()
+        val ignoredSerial = allDevices.count {
+            !UsbDeviceScanner.isLikelyKlipper(it) && UsbDeviceScanner.isSupported(it)
         }
+        if (ignoredSerial > 0) {
+            statusLines += "Ignored $ignoredSerial non-Klipper USB serial device(s) in this safe diagnostic build."
+        }
+
+        val supported = allDevices
+            .filter(UsbDeviceScanner::isLikelyKlipper)
+            .sortedBy { it.deviceName }
+            .mapNotNull { device ->
+                val driver = UsbDeviceScanner.probe(device)
+                if (driver == null) {
+                    statusLines += "${device.productName ?: device.deviceName}: known Klipper VID:PID but no CDC driver"
+                    return@mapNotNull null
+                }
+                if (!usbManager.hasPermission(device)) {
+                    statusLines += "${device.productName ?: device.deviceName}: waiting for USB permission"
+                    return@mapNotNull null
+                }
+                device to driver
+            }
 
         supported.forEachIndexed { index, (device, driver) ->
             try {
                 val connection = usbManager.openDevice(device)
                     ?: error("UsbManager.openDevice returned null")
-                val serial = runCatching { connection.serial }.getOrNull()
-                val stableId = serial?.takeIf { it.isNotBlank() }
-                    ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
+                val usbSerial = runCatching { connection.serial }.getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                val identity = usbSerial
+                    ?: "temporary-%04x:%04x:%d".format(device.vendorId, device.productId, device.deviceId)
                 val pty = PtyBridge.create()
-                val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
-                    publishStatus("USB bridge error for $stableId: ${error.message}")
+                val session = UsbSerialSession(driver, connection, identity, pty) { error ->
+                    publishStatus("USB bridge error for $identity: ${error.message}")
                 }
                 session.start()
                 sessions += session
 
                 val serialProbe = hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
-                val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
-                    hostprobe.callAttr(
-                        "probe_mcu_identify",
-                        pty.slavePath,
-                        helper.absolutePath,
-                        115200
-                    ).toString()
-                } else {
-                    "Klipper identify skipped: unknown serial device"
-                }
+                val identifyProbe = hostprobe.callAttr(
+                    "probe_mcu_identify",
+                    pty.slavePath,
+                    helper.absolutePath,
+                    115200
+                ).toString()
 
                 statusLines += buildString {
                     append("MCU ${index + 1}: ${device.productName ?: driver.javaClass.simpleName}\n")
-                    append("  id: $stableId\n")
+                    append("  USB serial: ${usbSerial ?: "UNAVAILABLE - mapping is temporary"}\n")
+                    append("  id: $identity\n")
                     append("  PTY: ${pty.slavePath}\n")
                     append("  Python: $serialProbe\n")
                     append("  Protocol: $identifyProbe")
@@ -101,15 +117,16 @@ class KlipperHostService : Service() {
             }
         }
 
-        val summary = if (statusLines.isEmpty()) {
-            "No supported USB serial devices with permission."
-        } else {
-            "AndroidKlipper host test\n\n" + statusLines.joinToString("\n\n")
+        if (allDevices.none(UsbDeviceScanner::isLikelyKlipper)) {
+            statusLines += "No known Klipper USB MCU found (expected VID:PID 1d50:614e)."
         }
+
+        val summary = "AndroidKlipper host test\n\n" + statusLines.joinToString("\n\n")
         publishStatus(summary)
     }
 
     private fun publishStatus(text: String) {
+        HostStatusStore.save(this, text)
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(NOTIFICATION_ID, notification(text.lineSequence().firstOrNull() ?: "AndroidKlipper"))
         sendBroadcast(Intent(ACTION_STATUS).apply {
