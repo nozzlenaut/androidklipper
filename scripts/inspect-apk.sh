@@ -12,8 +12,16 @@ for abi in arm64-v8a armeabi-v7a; do
   unzip -p "$APK" "lib/$abi/libklipper_c_helper.so" > "$TMP/chelper-$abi.so"
   [[ -s "$TMP/pty-$abi.so" ]]
   [[ -s "$TMP/chelper-$abi.so" ]]
-  readelf -Ws "$TMP/chelper-$abi.so" | grep -q ' get_monotonic$'
-  readelf -Ws "$TMP/chelper-$abi.so" | grep -q ' serialqueue_alloc$'
+  for symbol in \
+    get_monotonic \
+    serialqueue_alloc \
+    stepcompress_alloc \
+    steppersyncmgr_alloc \
+    trapq_alloc \
+    itersolve_generate_steps \
+    input_shaper_alloc; do
+    readelf -Ws "$TMP/chelper-$abi.so" | grep -q " $symbol$"
+  done
 done
 
 unzip -p "$APK" assets/chaquopy/app.imy > "$TMP/app.imy"
