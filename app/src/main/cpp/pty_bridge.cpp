@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <stdlib.h>
@@ -9,9 +10,24 @@ static std::string make_result(int fd, const char* path) {
     return std::to_string(fd) + "\n" + std::string(path);
 }
 
+static int wait_fd(int fd, short events, int timeout_ms) {
+    struct pollfd pfd{};
+    pfd.fd = fd;
+    pfd.events = events;
+    while (true) {
+        const int result = poll(&pfd, 1, timeout_ms);
+        if (result < 0 && errno == EINTR) continue;
+        if (result <= 0) return result;
+        if (pfd.revents & (POLLERR | POLLNVAL)) return -1;
+        if (pfd.revents & (events | POLLHUP)) return 1;
+    }
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeCreate(JNIEnv* env, jclass) {
-    int master = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+    // Non-blocking mode prevents a stalled Python consumer from wedging the
+    // Android USB reader thread indefinitely.
+    int master = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
     if (master < 0) return env->NewStringUTF("-1\n");
     if (grantpt(master) != 0 || unlockpt(master) != 0) {
         close(master);
@@ -30,31 +46,45 @@ extern "C" JNIEXPORT jint JNICALL
 Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeRead(
         JNIEnv* env, jclass, jint fd, jbyteArray buffer, jint timeoutMs) {
     if (fd < 0) return -1;
-    struct pollfd pfd{};
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    const int pr = poll(&pfd, 1, timeoutMs);
-    if (pr <= 0) return pr;
+    const int ready = wait_fd(fd, POLLIN, timeoutMs);
+    if (ready <= 0) return ready;
 
     const jsize cap = env->GetArrayLength(buffer);
     jbyte* bytes = env->GetByteArrayElements(buffer, nullptr);
-    const ssize_t n = read(fd, bytes, static_cast<size_t>(cap));
+    ssize_t n;
+    do {
+        n = read(fd, bytes, static_cast<size_t>(cap));
+    } while (n < 0 && errno == EINTR);
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) n = 0;
     env->ReleaseByteArrayElements(buffer, bytes, n > 0 ? 0 : JNI_ABORT);
     return static_cast<jint>(n);
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeWrite(
-        JNIEnv* env, jclass, jint fd, jbyteArray data) {
+        JNIEnv* env, jclass, jint fd, jbyteArray data, jint timeoutMs) {
     if (fd < 0) return -1;
     const jsize len = env->GetArrayLength(data);
     jbyte* bytes = env->GetByteArrayElements(data, nullptr);
     ssize_t total = 0;
+
     while (total < len) {
         const ssize_t n = write(fd, bytes + total, static_cast<size_t>(len - total));
-        if (n <= 0) break;
-        total += n;
+        if (n > 0) {
+            total += n;
+            continue;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            const int ready = wait_fd(fd, POLLOUT, timeoutMs);
+            if (ready > 0) continue;
+            if (total == 0) total = ready;
+            break;
+        }
+        if (total == 0) total = -1;
+        break;
     }
+
     env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
     return static_cast<jint>(total);
 }
