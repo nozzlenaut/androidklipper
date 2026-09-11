@@ -38,7 +38,34 @@ def probe_klipper_import():
     import serialhdl  # noqa: F401
     import mcu  # noqa: F401
     import toolhead  # noqa: F401
-    return "Klipper imports OK"
+    return "Klipper core imports OK"
+
+
+def probe_klipper_import_sweep():
+    """Import every bundled extras/kinematics module without configuring it.
+
+    Upstream Klipper has an equivalent --import-test path. Running the sweep on
+    the actual Android Python runtime catches missing packaged dependencies
+    before we ever attempt to start a printer.
+    """
+    import importlib
+    import os
+
+    klippy_dir = _klippy_path()
+    count = 0
+    for package in ("extras", "kinematics"):
+        package_dir = os.path.join(klippy_dir, package)
+        for entry in os.listdir(package_dir):
+            if entry.endswith(".py") and entry != "__init__.py":
+                module_name = entry[:-3]
+            else:
+                init_file = os.path.join(package_dir, entry, "__init__.py")
+                if not os.path.exists(init_file):
+                    continue
+                module_name = entry
+            importlib.import_module(package + "." + module_name)
+            count += 1
+    return "Klipper import sweep OK: %d modules" % count
 
 
 def probe_mcu_identify(path, c_helper_path, baud=115200):
