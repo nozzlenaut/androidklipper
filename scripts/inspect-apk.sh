@@ -43,6 +43,46 @@ unzip -p "$TMP/app.imy" klipper_vendor/KLIPPER_COMMIT \
 unzip -p "$TMP/app.imy" klipper_vendor/klippy/chelper/__init__.py \
   | grep -q 'ANDROID_KLIPPER_CHELPER'
 
+# Required Python packages must be present in the APK for both pure-Python and
+# ABI-specific extension pieces.
+unzip -p "$APK" assets/chaquopy/requirements-common.imy > "$TMP/requirements-common.imy"
+for path in \
+  serial/__init__.pyc \
+  jinja2/__init__.pyc \
+  markupsafe/__init__.pyc \
+  cffi/__init__.pyc \
+  greenlet/__init__.pyc; do
+  unzip -Z1 "$TMP/requirements-common.imy" | grep -q "^$path$"
+done
+
+for abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/requirements-$abi.imy" > "$TMP/requirements-$abi.imy"
+  unzip -Z1 "$TMP/requirements-$abi.imy" | grep -q '^_cffi_backend\.sofor abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+echo "APK packaging invariants: PASS"
+
+  unzip -Z1 "$TMP/requirements-$abi.imy" | grep -q '^greenlet/_greenlet\.sofor abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+echo "APK packaging invariants: PASS"
+
+done
+
 # Klipper relies on these POSIX Python modules on Android.
 for abi in arm64-v8a armeabi-v7a; do
   unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
