@@ -29,6 +29,8 @@ A Fire HD 8 proof-of-concept has already demonstrated Android -> USB serial brid
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+For the current native transport milestone, see [docs/FIRE_TEST.md](docs/FIRE_TEST.md) before installing the debug APK on a printer host.
+
 ## Build
 
 The CI build vendors a pinned Klipper snapshot before compiling:
