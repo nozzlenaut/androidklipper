@@ -143,4 +143,7 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
 
     if "error" in result:
         raise RuntimeError(result["error"])
-    return "Klipper identify OK: MCU={mcu}, {commands} commands, {version}".format(**result)
+    return (
+        "Klipper identify OK: MCU={mcu}, CLOCK_FREQ={clock}, "
+        "{commands} commands, {version}"
+    ).format(**result)
