@@ -17,55 +17,95 @@ class UsbSerialSession(
 ) : SerialInputOutputManager.Listener, AutoCloseable {
 
     private val running = AtomicBoolean(false)
-    private lateinit var port: UsbSerialPort
-    private lateinit var ioManager: SerialInputOutputManager
+    private val closed = AtomicBoolean(false)
+    private var port: UsbSerialPort? = null
+    private var ioManager: SerialInputOutputManager? = null
     private var ptyReader: Thread? = null
 
     fun start() {
-        port = driver.ports.firstOrNull() ?: throw IOException("USB serial device has no ports")
-        port.open(connection)
-        port.setParameters(250000, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-        runCatching { port.dtr = true }
-        runCatching { port.rts = true }
+        check(!closed.get()) { "USB serial session is already closed" }
+        try {
+            val openedPort = driver.ports.firstOrNull()
+                ?: throw IOException("USB serial device has no ports")
+            port = openedPort
+            openedPort.open(connection)
 
-        running.set(true)
-        ioManager = SerialInputOutputManager(port, this).apply {
-            setReadBufferSize(4096)
-            setWriteBufferSize(4096)
-            start()
-        }
+            // The current milestone opens only native Klipper CDC devices.
+            // Do not toggle DTR/RTS here: control-line behavior for generic
+            // USB-to-UART adapters belongs in a later transport implementation.
+            openedPort.setParameters(
+                250000,
+                8,
+                UsbSerialPort.STOPBITS_1,
+                UsbSerialPort.PARITY_NONE
+            )
 
-        ptyReader = Thread({
-            val buf = ByteArray(4096)
-            while (running.get()) {
-                try {
-                    val n = pty.read(buf, 250)
-                    if (n > 0) port.write(buf, n, 2000)
-                } catch (t: Throwable) {
-                    if (running.get()) onError(t)
-                    break
-                }
+            running.set(true)
+            val manager = SerialInputOutputManager(openedPort, this).apply {
+                setReadBufferSize(4096)
+                setWriteBufferSize(4096)
             }
-        }, "pty-to-usb-${stableId.takeLast(8)}").also { it.start() }
+            ioManager = manager
+            manager.start()
+
+            ptyReader = Thread({
+                val buf = ByteArray(4096)
+                while (running.get()) {
+                    try {
+                        val n = pty.read(buf, 250)
+                        if (n > 0) openedPort.write(buf, n, 2000)
+                    } catch (t: Throwable) {
+                        fail(t)
+                        break
+                    }
+                }
+            }, "pty-to-usb-${stableId.takeLast(8)}").also { it.start() }
+        } catch (t: Throwable) {
+            running.set(false)
+            closeResources()
+            throw t
+        }
     }
 
     override fun onNewData(data: ByteArray) {
+        if (!running.get()) return
         try {
-            pty.write(data)
+            val written = pty.write(data, 2000)
+            if (written != data.size) {
+                throw IOException("PTY write incomplete: $written/${data.size} bytes")
+            }
         } catch (t: Throwable) {
-            if (running.get()) onError(t)
+            fail(t)
         }
     }
 
     override fun onRunError(e: Exception) {
-        if (running.get()) onError(e)
+        fail(e)
+    }
+
+    private fun fail(t: Throwable) {
+        if (!running.compareAndSet(true, false)) return
+        runCatching { onError(t) }
+        closeResources()
     }
 
     override fun close() {
         running.set(false)
-        runCatching { ioManager.stop() }
-        runCatching { port.close() }
-        ptyReader?.interrupt()
+        closeResources()
+    }
+
+    private fun closeResources() {
+        if (!closed.compareAndSet(false, true)) return
+
+        runCatching { ioManager?.stop() }
+        runCatching { port?.close() }
+
+        val reader = ptyReader
+        reader?.interrupt()
+        if (reader != null && Thread.currentThread() !== reader) {
+            runCatching { reader.join(750) }
+        }
+
         runCatching { pty.close() }
         runCatching { connection.close() }
     }
