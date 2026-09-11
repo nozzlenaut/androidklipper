@@ -72,7 +72,9 @@ class MainActivity : Activity() {
             text = "Stop host test"
             setOnClickListener {
                 stopService(Intent(this@MainActivity, KlipperHostService::class.java))
-                status.text = "Host test stopped."
+                val stopped = "Host test stopped."
+                status.text = stopped
+                HostStatusStore.save(this@MainActivity, stopped)
             }
         }
 
@@ -127,7 +129,7 @@ class MainActivity : Activity() {
     }
 
     private fun copyReport() {
-        val report = HostStatusStore.load(this) ?: status.text.toString()
+        val report = status.text.toString()
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("AndroidKlipper diagnostic", report))
         Toast.makeText(this, "Diagnostic copied", Toast.LENGTH_SHORT).show()
