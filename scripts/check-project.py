@@ -37,6 +37,7 @@ pty = (root / "app/src/main/cpp/pty_bridge.cpp").read_text()
 assert "O_NONBLOCK" in pty
 assert "EAGAIN" in pty and "EINTR" in pty
 assert "slave_anchor" in pty and "POLLHUP" in pty
+assert "cfmakeraw" in pty and "tcsetattr" in pty
 
 cmake = (root / "app/src/main/cpp/CMakeLists.txt").read_text()
 expected = [
