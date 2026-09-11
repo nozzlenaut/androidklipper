@@ -31,7 +31,12 @@ if(EXISTS "${KLIPPER_CHELPER_DIR}/pyhelper.c")
         ${KLIPPER_CHELPER_DIR}/kin_generic.c
     )
     target_include_directories(klipper_c_helper PRIVATE ${KLIPPER_CHELPER_DIR})
-    target_compile_options(klipper_c_helper PRIVATE -O2 -fPIC)
+    target_compile_options(klipper_c_helper PRIVATE
+        -O2
+        -fPIC
+        -Wno-unknown-attributes
+        -Wno-macro-redefined
+    )
     # Klipper's helper uses libm functions. pthread/dl APIs are provided by
     # Android's bionic libc, but math is kept explicit so NDK link behavior is
     # deterministic across ARMv7 and ARM64.
