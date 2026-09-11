@@ -34,6 +34,7 @@ assert 'probe_klipper_import_sweep' in service
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "serial_reader._start_session" in hostprobe
 assert "serial_reader.connect_uart" not in hostprobe
+assert "import klipper_vendor" in hostprobe
 
 session = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt").read_text()
 assert "AtomicBoolean(false)" in session
