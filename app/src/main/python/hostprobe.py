@@ -89,7 +89,18 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
         nonlocal serial_reader
         try:
             serial_reader = serialhdl.SerialReader(r, mcu_name="android-probe")
-            serial_reader.connect_uart(path, int(baud))
+
+            # Do one direct PTY session rather than connect_uart(). Upstream
+            # connect_uart retries for up to 90 seconds and sends an AVR
+            # stk500v2 leave-programmer sequence before identifying. Neither is
+            # desirable for this deliberately harmless diagnostic. The Android
+            # bridge owns/configures the physical USB CDC port; this side only
+            # needs a raw byte stream into Klipper's normal SerialReader.
+            fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+            serial_dev = os.fdopen(fd, "rb+", buffering=0)
+            if not serial_reader._start_session(serial_dev):
+                raise RuntimeError("MCU identify timed out")
+
             parser = serial_reader.get_msgparser()
             version, build = parser.get_version_info()
             constants = parser.get_constants()
