@@ -6,6 +6,7 @@ required = [
     "app/src/main/AndroidManifest.xml",
     "app/src/main/cpp/pty_bridge.cpp",
     "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt",
+    "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt",
     "app/src/main/python/hostprobe.py",
     "scripts/vendor-klipper.sh",
 ]
@@ -20,6 +21,21 @@ build = (root / "app/build.gradle.kts").read_text()
 assert 'version = "3.11"' in build
 assert 'armeabi-v7a' in build and 'arm64-v8a' in build
 assert 'usb-serial-for-android:3.11.0' in build
+
+service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
+assert "START_NOT_STICKY" in service
+assert "HostStatusStore.save" in service
+assert ".filter(UsbDeviceScanner::isLikelyKlipper)" in service
+assert 'probe_klipper_import_sweep' in service
+
+session = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt").read_text()
+assert "AtomicBoolean(false)" in session
+assert "Do not toggle DTR/RTS" in session
+assert "PTY write incomplete" in session
+
+pty = (root / "app/src/main/cpp/pty_bridge.cpp").read_text()
+assert "O_NONBLOCK" in pty
+assert "EAGAIN" in pty and "EINTR" in pty
 
 cmake = (root / "app/src/main/cpp/CMakeLists.txt").read_text()
 expected = [
