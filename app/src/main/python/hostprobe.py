@@ -13,9 +13,12 @@ def probe_serial(path, baud=115200):
     import serial
     port = serial.Serial(port=None, baudrate=baud, timeout=0, exclusive=True)
     port.port = path
-    port.open()
-    port.close()
-    return "pySerial OK"
+    try:
+        port.open()
+        return "pySerial OK"
+    finally:
+        if port.is_open:
+            port.close()
 
 
 def probe_c_helper(path):
@@ -97,7 +100,11 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
             # bridge owns/configures the physical USB CDC port; this side only
             # needs a raw byte stream into Klipper's normal SerialReader.
             fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
-            serial_dev = os.fdopen(fd, "rb+", buffering=0)
+            try:
+                serial_dev = os.fdopen(fd, "rb+", buffering=0)
+            except BaseException:
+                os.close(fd)
+                raise
             if not serial_reader._start_session(serial_dev):
                 raise RuntimeError("MCU identify timed out")
 
