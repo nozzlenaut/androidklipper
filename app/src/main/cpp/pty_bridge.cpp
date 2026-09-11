@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdlib.h>
+#include <termios.h>
 #include <unistd.h>
 #include <string>
 
@@ -50,6 +51,24 @@ Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeCreate(JNIEnv* env, jclas
     // USB reader can start before pySerial opens the public slave path.
     int slave_anchor = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
     if (slave_anchor < 0) {
+        close(master);
+        return env->NewStringUTF("-1\n-1\n");
+    }
+
+    // PTYs start with a normal terminal line discipline, including echo.
+    // Klipper transports binary packets, so put the slave into raw mode before
+    // any USB bytes can arrive. pySerial will re-apply compatible settings
+    // when it opens the public slave path.
+    struct termios attrs{};
+    if (tcgetattr(slave_anchor, &attrs) != 0) {
+        close(slave_anchor);
+        close(master);
+        return env->NewStringUTF("-1\n-1\n");
+    }
+    cfmakeraw(&attrs);
+    attrs.c_cflag |= CLOCAL | CREAD;
+    if (tcsetattr(slave_anchor, TCSANOW, &attrs) != 0) {
+        close(slave_anchor);
         close(master);
         return env->NewStringUTF("-1\n-1\n");
     }
