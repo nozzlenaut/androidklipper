@@ -1,8 +1,16 @@
 def _klippy_path():
     import os
     import sys
-    here = os.path.dirname(__file__)
-    klippy_dir = os.path.join(here, "klipper_vendor", "klippy")
+
+    # Chaquopy's extractPackages setting materializes a package when that
+    # package is first imported. Import klipper_vendor explicitly before using
+    # os.listdir/open on its contents, then derive the real extracted path from
+    # the package rather than assuming it sits beside this module.
+    import klipper_vendor
+    package_dir = os.path.dirname(klipper_vendor.__file__)
+    klippy_dir = os.path.join(package_dir, "klippy")
+    if not os.path.isdir(klippy_dir):
+        raise RuntimeError("Extracted Klipper package directory is unavailable")
     if klippy_dir not in sys.path:
         sys.path.insert(0, klippy_dir)
     return klippy_dir
