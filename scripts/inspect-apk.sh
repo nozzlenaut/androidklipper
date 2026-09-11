@@ -69,6 +69,7 @@ echo "APK packaging invariants: PASS"
 
 unzip -p "$TMP/app.imy" klipper_vendor/KLIPPER_COMMIT \
   | grep -qx '2d7717e3b62ea2fe3401b27f54f8681f80451c69'
+[[ -n "$(unzip -p "$TMP/app.imy" klipper_vendor/klippy/.version)" ]]
 unzip -p "$TMP/app.imy" klipper_vendor/klippy/chelper/__init__.py \
   | grep -q 'ANDROID_KLIPPER_CHELPER'
 
