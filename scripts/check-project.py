@@ -17,11 +17,13 @@ for rel in required:
 manifest = (root / "app/src/main/AndroidManifest.xml").read_text()
 assert "android.hardware.usb.host" in manifest
 assert "foregroundServiceType=\"connectedDevice\"" in manifest
+assert 'android:allowBackup="false"' in manifest
 
 build = (root / "app/build.gradle.kts").read_text()
 assert 'version = "3.11"' in build
 assert 'armeabi-v7a' in build and 'arm64-v8a' in build
 assert 'usb-serial-for-android:3.11.0' in build
+assert "useLegacyPackaging = true" in build
 
 service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "START_NOT_STICKY" in service
