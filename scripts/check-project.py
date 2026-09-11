@@ -9,6 +9,7 @@ required = [
     "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt",
     "app/src/main/python/hostprobe.py",
     "scripts/vendor-klipper.sh",
+    "LICENSE",
 ]
 for rel in required:
     assert (root / rel).exists(), f"missing {rel}"
@@ -27,6 +28,10 @@ assert "START_NOT_STICKY" in service
 assert "HostStatusStore.save" in service
 assert ".filter(UsbDeviceScanner::isLikelyKlipper)" in service
 assert 'probe_klipper_import_sweep' in service
+
+hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
+assert "serial_reader._start_session" in hostprobe
+assert "serial_reader.connect_uart" not in hostprobe
 
 session = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt").read_text()
 assert "AtomicBoolean(false)" in session
