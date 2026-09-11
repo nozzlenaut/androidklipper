@@ -49,12 +49,21 @@ class KlipperHostService : Service() {
         val helper = File(applicationInfo.nativeLibraryDir, "libklipper_c_helper.so")
         val statusLines = mutableListOf<String>()
 
-        try {
-            statusLines += hostprobe.callAttr("probe_klipper_import").toString()
-            statusLines += hostprobe.callAttr("probe_klipper_import_sweep").toString()
-            statusLines += hostprobe.callAttr("probe_c_helper", helper.absolutePath).toString()
-        } catch (t: Throwable) {
-            statusLines += "Host runtime ERROR ${t.javaClass.simpleName}: ${t.message}"
+        fun runtimeProbe(name: String, block: () -> String) {
+            try {
+                statusLines += block()
+            } catch (t: Throwable) {
+                statusLines += "$name ERROR ${t.javaClass.simpleName}: ${t.message}"
+            }
+        }
+        runtimeProbe("Klipper core imports") {
+            hostprobe.callAttr("probe_klipper_import").toString()
+        }
+        runtimeProbe("Klipper module sweep") {
+            hostprobe.callAttr("probe_klipper_import_sweep").toString()
+        }
+        runtimeProbe("Klipper c_helper") {
+            hostprobe.callAttr("probe_c_helper", helper.absolutePath).toString()
         }
 
         val allDevices = usbManager.deviceList.values.toList()
