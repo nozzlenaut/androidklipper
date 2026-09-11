@@ -98,7 +98,12 @@ class KlipperHostService : Service() {
                     ?.takeIf { it.isNotBlank() }
                 val identity = usbSerial
                     ?: "temporary-%04x:%04x:%d".format(device.vendorId, device.productId, device.deviceId)
-                val pty = PtyBridge.create()
+                val pty = try {
+                    PtyBridge.create()
+                } catch (t: Throwable) {
+                    runCatching { connection.close() }
+                    throw t
+                }
                 val session = UsbSerialSession(driver, connection, identity, pty) { error ->
                     publishStatus("USB bridge error for $identity: ${error.message}")
                 }
