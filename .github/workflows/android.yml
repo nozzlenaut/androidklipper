@@ -51,8 +51,8 @@ jobs:
       - name: Static project checks
         run: python3 scripts/check-project.py
 
-      - name: Unit tests and debug APK
-        run: gradle --stacktrace :app:testDebugUnitTest :app:assembleDebug
+      - name: Lint, unit tests, and debug APK
+        run: gradle --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
 
       - name: Inspect packaged APK
         run: bash scripts/inspect-apk.sh

@@ -13,12 +13,15 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
 - [x] foreground connected-device service
 - [x] embedded Python/pySerial probe
 - [x] NDK build definition for Klipper c_helper
-- [x] runtime-only config rewriter + unit test
-- [ ] CI produces installable APK
+- [x] runtime-only config rewriter + unit tests
+- [x] CI produces and inspects an installable debug APK
+- [x] safe Klipper protocol-identify diagnostic path
+- [x] device-side Klipper module import sweep
 - [ ] Fire HD 8: 3 MCUs visible with stable serial IDs
 - [ ] Fire HD 8: 3 PTYs created simultaneously
 - [ ] Fire HD 8: pySerial opens all PTYs
 - [ ] Fire HD 8: prebuilt c_helper loads through cffi
+- [ ] Fire HD 8: Klipper identify succeeds on all 3 MCUs
 
 ## M2 - run real Klippy inside the app
 
@@ -30,7 +33,7 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
 
 ## M3 - useful printer host
 
-- [ ] import a full printer config tree
+- [ ] import a full printer config tree, including `[include ...]` files
 - [ ] Moonraker
 - [ ] bundled Mainsail
 - [ ] local web UI

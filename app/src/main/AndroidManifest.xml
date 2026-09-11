@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
@@ -7,7 +8,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:label="AndroidKlipper"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
@@ -18,9 +19,13 @@
             </intent-filter>
         </activity>
         <receiver android:name=".usb.UsbPermissionReceiver" android:exported="false" />
+        <!-- Runtime USB access is granted through UsbManager.requestPermission(),
+             which satisfies the connectedDevice foreground-service prerequisite.
+             Android lint cannot prove that dynamic permission path statically. -->
         <service
             android:name=".KlipperHostService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice"
+            tools:ignore="ForegroundServicePermission" />
     </application>
 </manifest>

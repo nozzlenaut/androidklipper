@@ -46,7 +46,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val safety = TextView(this).apply {
-            text = "Safe diagnostic build: the Klipper protocol test only identifies MCUs. It does not configure motion, heaters, fans, or GPIO."
+            text = "Safe diagnostic build: only known Klipper USB MCUs (1d50:614e) are opened. The protocol test identifies them but does not configure motion, heaters, fans, or GPIO."
             textSize = 14f
             setPadding(0, 16, 0, 8)
         }
@@ -72,7 +72,9 @@ class MainActivity : Activity() {
             text = "Stop host test"
             setOnClickListener {
                 stopService(Intent(this@MainActivity, KlipperHostService::class.java))
-                status.text = "Host test stopped."
+                val stopped = "Host test stopped."
+                status.text = stopped
+                HostStatusStore.save(this@MainActivity, stopped)
             }
         }
 
@@ -118,6 +120,7 @@ class MainActivity : Activity() {
                 found.forEachIndexed { index, d ->
                     append("${index + 1}. ${d.productName ?: d.deviceName}\n")
                     append("   VID:PID ${d.vendorId.toString(16).padStart(4, '0')}:${d.productId.toString(16).padStart(4, '0')}\n")
+                    append("   known Klipper USB: ${if (d.vendorId == UsbDeviceScanner.KLIPPER_VID && d.productId == UsbDeviceScanner.KLIPPER_PID) "yes" else "no"}\n")
                     append("   permission: ${if (d.hasPermission) "yes" else "no"}\n")
                     append("   driver: ${d.driverName ?: "not detected"}\n\n")
                 }
@@ -126,22 +129,24 @@ class MainActivity : Activity() {
     }
 
     private fun copyReport() {
-        val report = HostStatusStore.load(this) ?: status.text.toString()
+        val report = status.text.toString()
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("AndroidKlipper diagnostic", report))
         Toast.makeText(this, "Diagnostic copied", Toast.LENGTH_SHORT).show()
     }
 
     private fun requestUsbPermissionsAndStart() {
-        val devices = usbManager.deviceList.values.toList()
+        val devices = usbManager.deviceList.values
+            .filter(UsbDeviceScanner::isLikelyKlipper)
+            .sortedBy { it.deviceName }
+
         if (devices.isEmpty()) {
-            status.text = "No USB devices found."
+            status.text = "No known Klipper USB MCU found (expected VID:PID 1d50:614e). Scan USB will still show other attached devices."
             return
         }
 
         var requested = 0
         devices.forEachIndexed { index, device ->
-            if (!UsbDeviceScanner.isSupported(device)) return@forEachIndexed
             if (!usbManager.hasPermission(device)) {
                 val intent = Intent(this, UsbPermissionReceiver::class.java).apply {
                     action = UsbPermissionReceiver.ACTION_USB_PERMISSION
@@ -160,7 +165,7 @@ class MainActivity : Activity() {
         if (requested == 0) {
             KlipperHostService.start(this)
         } else {
-            status.text = "Grant USB permission for each printer MCU. The host test starts as permissions arrive."
+            status.text = "Grant USB permission for each Klipper MCU. The host test starts as permissions arrive."
         }
     }
 }
