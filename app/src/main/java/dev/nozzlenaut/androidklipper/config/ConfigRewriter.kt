@@ -16,6 +16,8 @@ object ConfigRewriter {
         Regex("^(\\s*)serial\\s*:\\s*(\\S+)(.*)$", RegexOption.IGNORE_CASE)
     private val baudRegex =
         Regex("^\\s*baud\\s*:", RegexOption.IGNORE_CASE)
+    private val restartRegex =
+        Regex("^\\s*restart_method\\s*:", RegexOption.IGNORE_CASE)
 
     fun extractUsbMcuRefs(text: String): List<McuRef> {
         val out = mutableListOf<McuRef>()
@@ -69,6 +71,9 @@ object ConfigRewriter {
                 }
                 target != null && baudRegex.containsMatchIn(line) -> {
                     out += "# ANDROID_DISABLED baud (PTY pipe transport) | OLD: $line"
+                }
+                target != null && restartRegex.containsMatchIn(line) -> {
+                    out += "# ANDROID_DISABLED restart_method (PTY pipe transport) | OLD: $line"
                 }
                 else -> out += line
             }
