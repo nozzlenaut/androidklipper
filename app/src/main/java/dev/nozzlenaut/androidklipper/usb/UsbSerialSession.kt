@@ -25,6 +25,8 @@ class UsbSerialSession(
     private val usbWriteRetries = AtomicLong(0)
     private val usbReadMisses = AtomicLong(0)
     private val startedAtMs = System.currentTimeMillis()
+    private val firstWriteAgeMs = AtomicLong(-1)
+    private val readerStartAgeMs = AtomicLong(-1)
     @Volatile private var lastError: String? = null
     private lateinit var port: UsbSerialPort
     private var usbReader: Thread? = null
@@ -69,6 +71,7 @@ class UsbSerialSession(
 
     private fun ensureUsbReaderStarted() {
         if (!usbReaderStarted.compareAndSet(false, true)) return
+        readerStartAgeMs.compareAndSet(-1, System.currentTimeMillis() - startedAtMs)
 
         // This is intentionally the exact direct-bulk read strategy which
         // successfully identified all three real Klipper MCUs in Phase 1.
@@ -106,6 +109,7 @@ class UsbSerialSession(
         // the known-good Phase 1 write path instead of issuing a sequence of
         // short retries which can further disturb Fire OS' USB host state.
         usbWriteCalls.incrementAndGet()
+        firstWriteAgeMs.compareAndSet(-1, System.currentTimeMillis() - startedAtMs)
         val written = connection.bulkTransfer(
             port.writeEndpoint,
             source,
@@ -132,6 +136,9 @@ class UsbSerialSession(
             append(", write_calls="); append(usbWriteCalls.get())
             append(", write_retries="); append(usbWriteRetries.get())
             append(", read_misses="); append(usbReadMisses.get())
+            append(", reader_started="); append(usbReaderStarted.get())
+            append(", first_write_age="); append(firstWriteAgeMs.get()); append("ms")
+            append(", reader_start_age="); append(readerStartAgeMs.get()); append("ms")
             lastError?.let { append(", last_error="); append(it) }
         }
     }
