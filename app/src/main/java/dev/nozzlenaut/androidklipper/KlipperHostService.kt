@@ -112,33 +112,16 @@ class KlipperHostService : Service() {
             }
         }
 
-        // Before full Klippy, reproduce its first harmless protocol transition
-        // on each already-open bridge: identify, then get_config. This isolates
-        // Android USB transport from printer configuration and never moves,
-        // heats, or changes MCU configuration.
-        statusLines += "Transport preflight:"
-        for ((stableId, ptyPath) in usbSerialToPty) {
-            try {
-                val probe = hostprobe.callAttr(
-                    "probe_mcu_get_config",
-                    ptyPath,
-                    helper.absolutePath
-                ).toString()
-                statusLines += "$stableId: $probe"
-                Thread.sleep(80)
-            } catch (t: Throwable) {
-                publishStatus(
-                    buildString {
-                        append("TRANSPORT PREFLIGHT FAILED\n\n")
-                        append(statusLines.joinToString("\n"))
-                        append("\n")
-                        append("$stableId: ${t.javaClass.simpleName}: ${t.message}")
-                        append("\n\nReal Klippy was not started.")
-                    }
-                )
-                return
-            }
-        }
+        // Some STM32 CDC devices on older Android/Fire OS stacks are not
+        // immediately ready for outbound traffic after open/line-state setup.
+        // The successful one-shot probe reached the STM32 only after probing
+        // two RP2040s first, while real Klippy connects the main STM32 first.
+        // Give all already-open USB sessions a clean settle window before any
+        // Klipper protocol traffic starts.
+        publishStatus(
+            "USB bridges ready. Letting all printer MCUs settle before Klippy starts…"
+        )
+        Thread.sleep(1800)
 
         val imported = File(filesDir, "printer_data/config-original/printer.cfg")
         if (!imported.isFile) {
