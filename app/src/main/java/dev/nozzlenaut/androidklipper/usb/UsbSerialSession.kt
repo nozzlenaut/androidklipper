@@ -1,10 +1,12 @@
 package dev.nozzlenaut.androidklipper.usb
 
 import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbRequest
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -28,6 +30,7 @@ class UsbSerialSession(
     private lateinit var port: UsbSerialPort
     private var usbReader: Thread? = null
     private var ptyReader: Thread? = null
+    @Volatile private var readRequest: UsbRequest? = null
 
     fun start() {
         port = driver.ports.firstOrNull() ?: throw IOException("USB serial device has no ports")
@@ -41,29 +44,51 @@ class UsbSerialSession(
         Thread.sleep(80)
         running.set(true)
 
-        // usb-serial-for-android performs an optional USB GET_STATUS probe when
-        // a zero-length/failed transfer is observed. Some Fire OS + Klipper CDC
-        // combinations reject that request even though the bulk endpoints are
-        // usable. For Klipper traffic, use the already-claimed bulk endpoints
-        // directly and keep the library only for CDC discovery/open/setup.
+        // Avoid repeated short-timeout bulkTransfer() reads. On older
+        // Android / Fire OS USB host stacks they can leave a CDC connection in
+        // a bad state after several idle timeouts. Keep one asynchronous USB
+        // request queued instead; it sleeps in the kernel until data arrives.
         usbReader = Thread({
-            val buf = ByteArray(4096)
-            while (running.get()) {
-                try {
-                    val n = connection.bulkTransfer(port.readEndpoint, buf, buf.size, 250)
+            val endpoint = port.readEndpoint
+            val request = UsbRequest()
+            if (!request.initialize(connection, endpoint)) {
+                throw IOException("Unable to initialize USB read request")
+            }
+            readRequest = request
+            val buffer = ByteBuffer.allocate(maxOf(4096, endpoint.maxPacketSize))
+            try {
+                while (running.get()) {
+                    buffer.clear()
+                    if (!request.queue(buffer, buffer.capacity())) {
+                        throw IOException("Unable to queue USB read request")
+                    }
+                    val response = connection.requestWait()
+                    if (!running.get()) break
+                    if (response == null) {
+                        throw IOException("USB read requestWait returned null")
+                    }
+                    if (response !== request) {
+                        throw IOException("Unexpected USB request completed")
+                    }
+                    val n = buffer.position()
                     if (n > 0) {
+                        buffer.flip()
+                        val data = ByteArray(n)
+                        buffer.get(data)
                         usbBytesIn.addAndGet(n.toLong())
-                        pty.write(buf.copyOf(n))
+                        pty.write(data)
                     } else {
                         usbReadMisses.incrementAndGet()
                     }
-                    // -1 is also Android's normal timeout result for bulkTransfer.
-                    // The next transfer or Klipper handshake will tell us if the
-                    // device really disappeared.
-                } catch (t: Throwable) {
-                    if (running.get()) onError(t)
-                    break
                 }
+            } catch (t: Throwable) {
+                if (running.get()) {
+                    lastError = "USB read failed: ${t.message}"
+                    onError(t)
+                }
+            } finally {
+                runCatching { request.cancel() }
+                readRequest = null
             }
         }, "usb-to-pty-${stableId.takeLast(8)}").also { it.start() }
 
@@ -156,6 +181,7 @@ class UsbSerialSession(
 
     override fun close() {
         running.set(false)
+        runCatching { readRequest?.cancel() }
         usbReader?.interrupt()
         ptyReader?.interrupt()
         runCatching { port.close() }
