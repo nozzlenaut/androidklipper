@@ -34,6 +34,8 @@ class ConfigRewriterTest {
             "serial: /dev/pts/4  # OLD: /dev/serial/by-id/usb-Klipper_rp2040_E6616407E30D6F2A-if00"
         ))
         assertFalse(rewritten.lineSequence().any { it.trimStart().startsWith("baud:") })
+        assertFalse(rewritten.lineSequence().any { it.trimStart().startsWith("restart_method:") })
+        assertTrue(rewritten.contains("# ANDROID_DISABLED restart_method"))
     }
 
     @Test
