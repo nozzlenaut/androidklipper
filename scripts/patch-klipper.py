@@ -2,13 +2,14 @@
 from pathlib import Path
 import sys
 
-if len(sys.argv) != 5:
-    raise SystemExit("usage: patch-klipper.py <chelper/__init__.py> <serialhdl.py> <mcu.py> <util.py>")
+if len(sys.argv) != 6:
+    raise SystemExit("usage: patch-klipper.py <chelper/__init__.py> <serialhdl.py> <mcu.py> <util.py> <klippy.py>")
 
 chelper_path = Path(sys.argv[1])
 serialhdl_path = Path(sys.argv[2])
 mcu_path = Path(sys.argv[3])
 util_path = Path(sys.argv[4])
+klippy_path = Path(sys.argv[5])
 
 text = chelper_path.read_text()
 needle = "def check_build_c_library():\n    srcdir = os.path.dirname(os.path.realpath(__file__))\n"
@@ -61,3 +62,37 @@ replacement = """    try:
 if needle not in text:
     raise SystemExit("Klipper util PTY patch point changed; inspect upstream before updating the pin")
 util_path.write_text(text.replace(needle, replacement, 1))
+
+
+text = klippy_path.read_text()
+needle = '''        py_name = os.path.join(os.path.dirname(__file__),
+                               'extras', module_name + '.py')
+        py_dirname = os.path.join(os.path.dirname(__file__),
+                                  'extras', module_name, '__init__.py')
+        if not os.path.exists(py_name) and not os.path.exists(py_dirname):
+            if default is not configfile.sentinel:
+                return default
+            raise self.config_error("Unable to load module '%s'" % (section,))
+        mod = importlib.import_module('extras.' + module_name)
+'''
+replacement = '''        if os.environ.get('ANDROID_KLIPPER_CHELPER'):
+            try:
+                mod = importlib.import_module('extras.' + module_name)
+            except (ImportError, ModuleNotFoundError):
+                if default is not configfile.sentinel:
+                    return default
+                raise self.config_error("Unable to load module '%s'" % (section,))
+        else:
+            py_name = os.path.join(os.path.dirname(__file__),
+                                   'extras', module_name + '.py')
+            py_dirname = os.path.join(os.path.dirname(__file__),
+                                      'extras', module_name, '__init__.py')
+            if not os.path.exists(py_name) and not os.path.exists(py_dirname):
+                if default is not configfile.sentinel:
+                    return default
+                raise self.config_error("Unable to load module '%s'" % (section,))
+            mod = importlib.import_module('extras.' + module_name)
+'''
+if needle not in text:
+    raise SystemExit('Klipper dynamic extras patch point changed')
+klippy_path.write_text(text.replace(needle, replacement, 1))
