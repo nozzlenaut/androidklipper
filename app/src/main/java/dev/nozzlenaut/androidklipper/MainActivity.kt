@@ -1,6 +1,7 @@
 package dev.nozzlenaut.androidklipper
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -20,11 +21,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import dev.nozzlenaut.androidklipper.config.ConfigMigration
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
+import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var startButton: Button
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -41,56 +45,57 @@ class MainActivity : Activity() {
             setPadding(32, 32, 32, 32)
         }
         val heading = TextView(this).apply {
-            text = "AndroidKlipper host proof-of-concept"
-            textSize = 22f
+            text = "AndroidKlipper"
+            textSize = 24f
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val safety = TextView(this).apply {
-            text = "Safe diagnostic build: the Klipper protocol test only identifies MCUs. It does not configure motion, heaters, fans, or GPIO."
+            text = "Phase 2: import your existing Voron config from klipper-nuc, preserve the original, then boot real Klippy on this tablet. This build exposes no motion or heater controls."
             textSize = 14f
             setPadding(0, 16, 0, 8)
         }
         status = TextView(this).apply {
             text = HostStatusStore.load(this@MainActivity)
-                ?: "Plug the printer into USB OTG, then scan."
+                ?: "Connect the Voron USB hub, then tap Migrate & Start."
             textSize = 15f
             setPadding(0, 24, 0, 24)
         }
-        val scan = Button(this).apply {
-            text = "Scan USB"
-            setOnClickListener { scanUsb() }
-        }
-        val test = Button(this).apply {
-            text = "Grant USB access and start host test"
-            setOnClickListener { requestUsbPermissionsAndStart() }
+
+        startButton = Button(this).apply {
+            text = "Migrate & Start Klipper"
+            setOnClickListener { migrateThenStart() }
         }
         val copy = Button(this).apply {
-            text = "Copy diagnostic report"
+            text = "Copy diagnostics"
             setOnClickListener { copyReport() }
         }
         val stop = Button(this).apply {
-            text = "Stop host test"
+            text = "Stop host"
             setOnClickListener {
                 stopService(Intent(this@MainActivity, KlipperHostService::class.java))
-                status.text = "Host test stopped."
+                status.text = "Host stop requested. The imported original config remains saved."
             }
         }
 
         root.addView(heading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(safety, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        root.addView(scan)
-        root.addView(test)
+        root.addView(startButton)
         root.addView(copy)
         root.addView(stop)
         setContentView(ScrollView(this).apply { addView(root) })
 
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 44)
         }
+
         if (HostStatusStore.load(this) == null) scanUsb()
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onStart() {
         super.onStart()
         HostStatusStore.load(this)?.let { status.text = it }
@@ -108,18 +113,44 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    private fun migrateThenStart() {
+        startButton.isEnabled = false
+        status.text = "Importing the existing Klipper config from klipper-nuc over Moonraker…"
+
+        Thread({
+            try {
+                val result = ConfigMigration.importFromMoonraker(
+                    this,
+                    listOf(
+                        "http://192.168.1.83:7125",
+                        "http://klipper-nuc.local:7125",
+                        "http://klipper-nuc:7125"
+                    )
+                )
+                runOnUiThread {
+                    status.text = "Imported ${result.fileCount} config files from ${result.source}.\n\nNow requesting USB access…"
+                    requestUsbPermissionsAndStart()
+                }
+            } catch (t: Throwable) {
+                runOnUiThread {
+                    startButton.isEnabled = true
+                    status.text = "Config import failed: ${t.message}"
+                }
+            }
+        }, "config-migration").start()
+    }
+
     private fun scanUsb() {
         val found = UsbDeviceScanner.describeDevices(usbManager)
         status.text = if (found.isEmpty()) {
-            "No USB devices found."
+            "No USB devices found yet. Connect the Voron USB hub, then tap Migrate & Start."
         } else {
             buildString {
                 append("USB devices found: ${found.size}\n\n")
                 found.forEachIndexed { index, d ->
                     append("${index + 1}. ${d.productName ?: d.deviceName}\n")
-                    append("   VID:PID ${d.vendorId.toString(16).padStart(4, '0')}:${d.productId.toString(16).padStart(4, '0')}\n")
-                    append("   permission: ${if (d.hasPermission) "yes" else "no"}\n")
-                    append("   driver: ${d.driverName ?: "not detected"}\n\n")
+                    append("   ${d.vendorId.toString(16).padStart(4, '0')}:${d.productId.toString(16).padStart(4, '0')}")
+                    append(" · ${d.driverName ?: "no serial driver"}\n")
                 }
             }
         }
@@ -129,13 +160,14 @@ class MainActivity : Activity() {
         val report = HostStatusStore.load(this) ?: status.text.toString()
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("AndroidKlipper diagnostic", report))
-        Toast.makeText(this, "Diagnostic copied", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Diagnostics copied", Toast.LENGTH_SHORT).show()
     }
 
     private fun requestUsbPermissionsAndStart() {
         val devices = usbManager.deviceList.values.toList()
         if (devices.isEmpty()) {
-            status.text = "No USB devices found."
+            startButton.isEnabled = true
+            status.text = "Config imported, but no USB devices are attached."
             return
         }
 
@@ -160,7 +192,8 @@ class MainActivity : Activity() {
         if (requested == 0) {
             KlipperHostService.start(this)
         } else {
-            status.text = "Grant USB permission for each printer MCU. The host test starts as permissions arrive."
+            status.text = "Allow USB access for each printer MCU. Klippy starts automatically after the final permission."
         }
+        startButton.isEnabled = true
     }
 }

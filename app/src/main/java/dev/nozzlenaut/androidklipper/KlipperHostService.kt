@@ -11,19 +11,30 @@ import android.os.Build
 import android.os.IBinder
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import dev.nozzlenaut.androidklipper.config.ConfigRuntimePreparer
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class KlipperHostService : Service() {
     private val sessions = CopyOnWriteArrayList<UsbSerialSession>()
+    private val bridgeErrors = CopyOnWriteArrayList<String>()
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
     private val hostExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "androidklipper-host").apply { isDaemon = true }
     }
+
+    private val startInProgress = AtomicBoolean(false)
+
+    @Volatile
+    private var klippyThread: Thread? = null
+
+    @Volatile
+    private var klippyThreadError: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -31,19 +42,28 @@ class KlipperHostService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, notification("Starting USB host test…"))
-        // USB permission callbacks can arrive close together for multi-MCU printers.
-        // Serialize rebuilds so two service starts never fight over the same device.
-        hostExecutor.execute { rebuildSessions() }
+        startForeground(NOTIFICATION_ID, notification("Starting AndroidKlipper…"))
+        if (startInProgress.compareAndSet(false, true)) {
+            hostExecutor.execute {
+                try {
+                    rebuildSessionsAndStart()
+                } finally {
+                    startInProgress.set(false)
+                }
+            }
+        }
         return START_STICKY
     }
 
-    private fun rebuildSessions() {
+    private fun rebuildSessionsAndStart() {
+        stopKlippy()
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
+        bridgeErrors.clear()
 
         if (!Python.isStarted()) Python.start(AndroidPlatform(this))
-        val hostprobe = Python.getInstance().getModule("hostprobe")
+        val python = Python.getInstance()
+        val hostprobe = python.getModule("hostprobe")
         val helper = File(applicationInfo.nativeLibraryDir, "libklipper_c_helper.so")
         val statusLines = mutableListOf<String>()
 
@@ -51,7 +71,8 @@ class KlipperHostService : Service() {
             statusLines += hostprobe.callAttr("probe_klipper_import").toString()
             statusLines += hostprobe.callAttr("probe_c_helper", helper.absolutePath).toString()
         } catch (t: Throwable) {
-            statusLines += "Host runtime ERROR ${t.javaClass.simpleName}: ${t.message}"
+            publishStatus("Host runtime error: ${t.javaClass.simpleName}: ${t.message}")
+            return
         }
 
         val supported = usbManager.deviceList.values.mapNotNull { device ->
@@ -63,6 +84,12 @@ class KlipperHostService : Service() {
             device to driver
         }
 
+        if (supported.isEmpty()) {
+            publishStatus("No supported USB serial devices with permission.")
+            return
+        }
+
+        val usbSerialToPty = linkedMapOf<String, String>()
         supported.forEachIndexed { index, (device, driver) ->
             try {
                 val connection = usbManager.openDevice(device)
@@ -72,44 +99,158 @@ class KlipperHostService : Service() {
                     ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
                 val pty = PtyBridge.create()
                 val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
-                    publishStatus("USB bridge error for $stableId: ${error.message}")
+                    val detail = "USB bridge error for $stableId: ${error.message}"
+                    bridgeErrors += detail
+                    publishStatus(detail)
                 }
                 session.start()
                 sessions += session
+                usbSerialToPty[stableId] = pty.slavePath
 
-                val serialProbe = hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
-                val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
-                    hostprobe.callAttr(
-                        "probe_mcu_identify",
-                        pty.slavePath,
-                        helper.absolutePath,
-                        115200
-                    ).toString()
-                } else {
-                    "Klipper identify skipped: unknown serial device"
-                }
-
-                statusLines += buildString {
-                    append("MCU ${index + 1}: ${device.productName ?: driver.javaClass.simpleName}\n")
-                    append("  id: $stableId\n")
-                    append("  PTY: ${pty.slavePath}\n")
-                    append("  Python: $serialProbe\n")
-                    append("  Protocol: $identifyProbe")
-                }
+                statusLines += "USB MCU ${index + 1}: $stableId -> ${pty.slavePath}"
             } catch (t: Throwable) {
-                statusLines += "${device.productName ?: device.deviceName}: ERROR ${t.javaClass.simpleName}: ${t.message}"
+                publishStatus(
+                    "${device.productName ?: device.deviceName}: ERROR ${t.javaClass.simpleName}: ${t.message}"
+                )
+                return
             }
         }
 
-        val summary = if (statusLines.isEmpty()) {
-            "No supported USB serial devices with permission."
-        } else {
-            "AndroidKlipper host test\n\n" + statusLines.joinToString("\n\n")
+        // Some STM32 CDC devices on older Android/Fire OS stacks are not
+        // immediately ready for outbound traffic after open/line-state setup.
+        // The successful one-shot probe reached the STM32 only after probing
+        // two RP2040s first, while real Klippy connects the main STM32 first.
+        // Give all already-open USB sessions a clean settle window before any
+        // Klipper protocol traffic starts.
+        publishStatus(
+            "USB bridges ready. Letting all printer MCUs settle before Klippy starts…"
+        )
+        Thread.sleep(1800)
+
+        val imported = File(filesDir, "printer_data/config-original/printer.cfg")
+        if (!imported.isFile) {
+            publishStatus(
+                "USB bridge is ready, but no imported printer.cfg exists. Tap Migrate & Start first."
+            )
+            return
         }
-        publishStatus(summary)
+
+        try {
+            val prepared = ConfigRuntimePreparer.prepare(this, usbSerialToPty)
+            val missingMappings = usbSerialToPty.keys - prepared.mappedUsbIds
+            statusLines += "Mapped MCU USB IDs: ${prepared.mappedUsbIds.joinToString()}"
+            if (missingMappings.isNotEmpty()) {
+                statusLines += "Unreferenced USB serial devices: ${missingMappings.joinToString()}"
+            }
+            publishStatus(
+                "Config migrated. Starting real Klippy…\n\n" +
+                    statusLines.joinToString("\n")
+            )
+            startRealKlippy(prepared, helper)
+        } catch (t: Throwable) {
+            publishStatus(
+                "Runtime config preparation failed: ${t.javaClass.simpleName}: ${t.message}"
+            )
+        }
+    }
+
+    private fun startRealKlippy(
+        prepared: ConfigRuntimePreparer.Prepared,
+        helper: File
+    ) {
+        val dataDir = File(filesDir, "printer_data")
+        val logFile = File(dataDir, "logs/klippy-android.log")
+        val apiSocket = File(dataDir, "comms/klippy.sock")
+        val inputTty = File(dataDir, "run/printer")
+        logFile.parentFile?.mkdirs()
+        apiSocket.parentFile?.mkdirs()
+        inputTty.parentFile?.mkdirs()
+        logFile.delete()
+        apiSocket.delete()
+        inputTty.delete()
+        klippyThreadError = null
+
+        val runner = Python.getInstance().getModule("klipper_runner")
+        klippyThread = Thread({
+            try {
+                runner.callAttr(
+                    "run",
+                    prepared.configFile.absolutePath,
+                    apiSocket.absolutePath,
+                    logFile.absolutePath,
+                    inputTty.absolutePath,
+                    helper.absolutePath
+                )
+            } catch (t: Throwable) {
+                klippyThreadError = "${t.javaClass.simpleName}: ${t.message}"
+            }
+        }, "klippy-runtime").apply {
+            isDaemon = true
+            start()
+        }
+
+        val deadline = System.currentTimeMillis() + 30_000
+        while (System.currentTimeMillis() < deadline) {
+            val logText = runCatching {
+                if (logFile.isFile) logFile.readText() else ""
+            }.getOrDefault("")
+
+            if (logText.contains("Printer is ready")) {
+                publishStatus(
+                    buildString {
+                        append("PRINTER IS READY ✅\n\n")
+                        append("Real Klippy is running on the Fire tablet.\n")
+                        append("Config source preserved in config-original.\n")
+                        append("Mapped ${prepared.mappedUsbIds.size} MCU USB IDs.\n\n")
+                        append("This build intentionally exposes no motion/heater controls yet.")
+                    }
+                )
+                return
+            }
+
+            val thread = klippyThread
+            if (thread == null || !thread.isAlive) break
+            Thread.sleep(250)
+        }
+
+        val tail = tailLog(logFile, 55)
+        val threadError = klippyThreadError
+        publishStatus(
+            buildString {
+                append("Klippy did not reach ready.\n")
+                if (!threadError.isNullOrBlank()) append("Runtime: $threadError\n")
+                append("\nBridge telemetry:\n")
+                sessions.forEach { append(it.telemetry()); append("\n") }
+                if (bridgeErrors.isNotEmpty()) {
+                    append("Bridge errors:\n")
+                    bridgeErrors.forEach { append(it); append("\n") }
+                }
+                append("\nLast Klippy log lines:\n")
+                append(tail.ifBlank { "(log empty)" })
+            }
+        )
+    }
+
+    private fun tailLog(file: File, lineCount: Int): String {
+        if (!file.isFile) return ""
+        return runCatching {
+            file.readLines().takeLast(lineCount).joinToString("\n")
+        }.getOrDefault("")
+    }
+
+    private fun stopKlippy() {
+        if (Python.isStarted()) {
+            runCatching {
+                Python.getInstance().getModule("klipper_runner").callAttr("stop")
+            }
+        }
+        runCatching { klippyThread?.join(1200) }
+        klippyThread = null
+        klippyThreadError = null
     }
 
     private fun publishStatus(text: String) {
+        HostStatusStore.save(this, text)
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(NOTIFICATION_ID, notification(text.lineSequence().firstOrNull() ?: "AndroidKlipper"))
         sendBroadcast(Intent(ACTION_STATUS).apply {
@@ -143,6 +284,7 @@ class KlipperHostService : Service() {
     }
 
     override fun onDestroy() {
+        stopKlippy()
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
         hostExecutor.shutdownNow()

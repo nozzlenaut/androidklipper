@@ -62,7 +62,7 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
         nonlocal serial_reader
         try:
             serial_reader = serialhdl.SerialReader(r, mcu_name="android-probe")
-            serial_reader.connect_uart(path, int(baud))
+            serial_reader.connect_pipe(path)
             parser = serial_reader.get_msgparser()
             version, build = parser.get_version_info()
             constants = parser.get_constants()
@@ -91,3 +91,57 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
     if "error" in result:
         raise RuntimeError(result["error"])
     return "Klipper identify OK: MCU={mcu}, {commands} commands, {version}".format(**result)
+
+
+def probe_mcu_get_config(path, c_helper_path):
+    """Identify one MCU and then issue the same harmless get_config query Klippy
+    sends first during startup. This does not configure, move, heat, or toggle GPIO.
+    """
+    import os
+    os.environ["ANDROID_KLIPPER_CHELPER"] = c_helper_path
+    _klippy_path()
+
+    import reactor
+    import serialhdl
+
+    r = reactor.Reactor()
+    result = {}
+    serial_reader = None
+
+    def connect(eventtime):
+        nonlocal serial_reader
+        try:
+            serial_reader = serialhdl.SerialReader(r, mcu_name="android-get-config-probe")
+            serial_reader.connect_pipe(path)
+            parser = serial_reader.get_msgparser()
+            version, build = parser.get_version_info()
+            response = serial_reader.send_with_response("get_config", "config")
+            result["mcu"] = str(parser.get_constants().get("MCU", "unknown"))
+            result["version"] = str(version)
+            result["is_config"] = str(response.get("is_config"))
+            result["crc"] = str(response.get("crc"))
+            result["is_shutdown"] = str(response.get("is_shutdown"))
+            result["move_count"] = str(response.get("move_count"))
+        except BaseException as exc:
+            result["error"] = "%s: %s" % (type(exc).__name__, exc)
+        finally:
+            if serial_reader is not None:
+                try:
+                    serial_reader.disconnect()
+                except BaseException:
+                    pass
+            r.end()
+        return r.NEVER
+
+    r.register_callback(connect)
+    try:
+        r.run()
+    finally:
+        r.finalize()
+
+    if "error" in result:
+        raise RuntimeError(result["error"])
+    return (
+        "identify + get_config OK: MCU={mcu}, is_config={is_config}, "
+        "crc={crc}, shutdown={is_shutdown}, moves={move_count}, {version}"
+    ).format(**result)
