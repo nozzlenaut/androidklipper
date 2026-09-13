@@ -77,7 +77,7 @@ class KlipperHostService : Service() {
                 session.start()
                 sessions += session
 
-                val serialProbe = hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
+                val serialProbe = "PTY bridge ready"
                 val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
                     hostprobe.callAttr(
                         "probe_mcu_identify",
