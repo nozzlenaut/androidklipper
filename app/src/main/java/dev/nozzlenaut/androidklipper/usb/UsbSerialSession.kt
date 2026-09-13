@@ -27,6 +27,9 @@ class UsbSerialSession(
         runCatching { port.dtr = true }
         runCatching { port.rts = true }
 
+        // Give Fire OS / the USB controller a moment to finish endpoint setup
+        // before Klippy starts sending its first protocol frames.
+        Thread.sleep(80)
         running.set(true)
 
         // usb-serial-for-android performs an optional USB GET_STATUS probe when
@@ -55,18 +58,55 @@ class UsbSerialSession(
             while (running.get()) {
                 try {
                     val n = pty.read(buf, 250)
-                    if (n > 0) {
-                        val written = connection.bulkTransfer(port.writeEndpoint, buf, n, 2000)
-                        if (written != n) {
-                            throw IOException("USB bulk write failed: wrote $written of $n bytes")
-                        }
-                    }
+                    if (n > 0) writeFully(buf, n)
                 } catch (t: Throwable) {
                     if (running.get()) onError(t)
                     break
                 }
             }
         }, "pty-to-usb-${stableId.takeLast(8)}").also { it.start() }
+    }
+
+    private fun writeFully(source: ByteArray, length: Int) {
+        var offset = 0
+        var transientFailures = 0
+
+        while (running.get() && offset < length) {
+            val remaining = length - offset
+            val chunk = if (offset == 0 && remaining == source.size) {
+                source
+            } else {
+                source.copyOfRange(offset, length)
+            }
+
+            val written = connection.bulkTransfer(
+                port.writeEndpoint,
+                chunk,
+                remaining,
+                250
+            )
+
+            if (written > 0) {
+                offset += written
+                transientFailures = 0
+                continue
+            }
+
+            // Android bulkTransfer() returns -1 for both a timeout and some
+            // transient controller conditions. A single -1 does not mean the
+            // Klipper MCU disappeared, so retry briefly before failing the link.
+            transientFailures++
+            if (transientFailures >= 8) {
+                throw IOException(
+                    "USB bulk write failed after retries: wrote $offset of $length bytes"
+                )
+            }
+            Thread.sleep((transientFailures * 10L).coerceAtMost(50L))
+        }
+
+        if (offset != length && running.get()) {
+            throw IOException("USB bulk write incomplete: wrote $offset of $length bytes")
+        }
     }
 
     override fun close() {
