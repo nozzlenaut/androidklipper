@@ -1,6 +1,7 @@
 package dev.nozzlenaut.androidklipper
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -41,12 +42,12 @@ class MainActivity : Activity() {
             setPadding(32, 32, 32, 32)
         }
         val heading = TextView(this).apply {
-            text = "AndroidKlipper host proof-of-concept"
+            text = "AndroidKlipper"
             textSize = 22f
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val safety = TextView(this).apply {
-            text = "Safe diagnostic build: the Klipper protocol test only identifies MCUs. It does not configure motion, heaters, fans, or GPIO."
+            text = "Plug the printer into this tablet, then tap Start Klipper Host. This safety build only identifies MCUs; it will not move motors or enable heaters."
             textSize = 14f
             setPadding(0, 16, 0, 8)
         }
@@ -56,12 +57,8 @@ class MainActivity : Activity() {
             textSize = 15f
             setPadding(0, 24, 0, 24)
         }
-        val scan = Button(this).apply {
-            text = "Scan USB"
-            setOnClickListener { scanUsb() }
-        }
         val test = Button(this).apply {
-            text = "Grant USB access and start host test"
+            text = "Start Klipper Host"
             setOnClickListener { requestUsbPermissionsAndStart() }
         }
         val copy = Button(this).apply {
@@ -72,14 +69,13 @@ class MainActivity : Activity() {
             text = "Stop host test"
             setOnClickListener {
                 stopService(Intent(this@MainActivity, KlipperHostService::class.java))
-                status.text = "Host test stopped."
+                status.text = "Host stopped. The tablet can be used normally."
             }
         }
 
         root.addView(heading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(safety, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        root.addView(scan)
         root.addView(test)
         root.addView(copy)
         root.addView(stop)
@@ -91,6 +87,7 @@ class MainActivity : Activity() {
         if (HostStatusStore.load(this) == null) scanUsb()
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onStart() {
         super.onStart()
         HostStatusStore.load(this)?.let { status.text = it }
@@ -135,7 +132,7 @@ class MainActivity : Activity() {
     private fun requestUsbPermissionsAndStart() {
         val devices = usbManager.deviceList.values.toList()
         if (devices.isEmpty()) {
-            status.text = "No USB devices found."
+            status.text = "No USB devices found. Check the OTG connection and try again."
             return
         }
 
@@ -160,7 +157,7 @@ class MainActivity : Activity() {
         if (requested == 0) {
             KlipperHostService.start(this)
         } else {
-            status.text = "Grant USB permission for each printer MCU. The host test starts as permissions arrive."
+            status.text = "Allow USB access when Android asks. The host test starts automatically."
         }
     }
 }
