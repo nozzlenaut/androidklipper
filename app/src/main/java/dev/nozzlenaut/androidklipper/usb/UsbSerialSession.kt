@@ -6,6 +6,7 @@ import com.hoho.android.usbserial.driver.UsbSerialPort
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class UsbSerialSession(
     private val driver: UsbSerialDriver,
@@ -16,6 +17,14 @@ class UsbSerialSession(
 ) : AutoCloseable {
 
     private val running = AtomicBoolean(false)
+    private val usbBytesIn = AtomicLong(0)
+    private val usbBytesOut = AtomicLong(0)
+    private val ptyBytesIn = AtomicLong(0)
+    private val usbWriteCalls = AtomicLong(0)
+    private val usbWriteRetries = AtomicLong(0)
+    private val usbReadMisses = AtomicLong(0)
+    private val startedAtMs = System.currentTimeMillis()
+    @Volatile private var lastError: String? = null
     private lateinit var port: UsbSerialPort
     private var usbReader: Thread? = null
     private var ptyReader: Thread? = null
@@ -42,7 +51,12 @@ class UsbSerialSession(
             while (running.get()) {
                 try {
                     val n = connection.bulkTransfer(port.readEndpoint, buf, buf.size, 250)
-                    if (n > 0) pty.write(buf.copyOf(n))
+                    if (n > 0) {
+                        usbBytesIn.addAndGet(n.toLong())
+                        pty.write(buf.copyOf(n))
+                    } else {
+                        usbReadMisses.incrementAndGet()
+                    }
                     // -1 is also Android's normal timeout result for bulkTransfer.
                     // The next transfer or Klipper handshake will tell us if the
                     // device really disappeared.
@@ -58,7 +72,10 @@ class UsbSerialSession(
             while (running.get()) {
                 try {
                     val n = pty.read(buf, 250)
-                    if (n > 0) writeFully(buf, n)
+                    if (n > 0) {
+                        ptyBytesIn.addAndGet(n.toLong())
+                        writeFully(buf, n)
+                    }
                 } catch (t: Throwable) {
                     if (running.get()) onError(t)
                     break
@@ -88,7 +105,9 @@ class UsbSerialSession(
                 )
             }
 
+            usbWriteCalls.incrementAndGet()
             if (written > 0) {
+                usbBytesOut.addAndGet(written.toLong())
                 offset += written
                 transientFailures = 0
                 continue
@@ -98,16 +117,32 @@ class UsbSerialSession(
             // transient controller conditions. A single -1 does not mean the
             // Klipper MCU disappeared, so retry briefly before failing the link.
             transientFailures++
+            usbWriteRetries.incrementAndGet()
             if (transientFailures >= 8) {
-                throw IOException(
-                    "USB bulk write failed after retries: wrote $offset of $length bytes"
-                )
+                val msg = "USB bulk write failed after retries: wrote $offset of $length bytes"
+                lastError = msg
+                throw IOException(msg)
             }
             Thread.sleep((transientFailures * 10L).coerceAtMost(50L))
         }
 
         if (offset != length && running.get()) {
             throw IOException("USB bulk write incomplete: wrote $offset of $length bytes")
+        }
+    }
+
+    fun telemetry(): String {
+        val ageMs = System.currentTimeMillis() - startedAtMs
+        return buildString {
+            append(stableId)
+            append(": age="); append(ageMs); append("ms")
+            append(", usb_in="); append(usbBytesIn.get())
+            append(", pty_outbound="); append(ptyBytesIn.get())
+            append(", usb_out="); append(usbBytesOut.get())
+            append(", write_calls="); append(usbWriteCalls.get())
+            append(", write_retries="); append(usbWriteRetries.get())
+            append(", read_misses="); append(usbReadMisses.get())
+            lastError?.let { append(", last_error="); append(it) }
         }
     }
 
