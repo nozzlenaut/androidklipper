@@ -18,6 +18,7 @@ import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class KlipperHostService : Service() {
     private val sessions = CopyOnWriteArrayList<UsbSerialSession>()
@@ -25,6 +26,8 @@ class KlipperHostService : Service() {
     private val hostExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "androidklipper-host").apply { isDaemon = true }
     }
+
+    private val startInProgress = AtomicBoolean(false)
 
     @Volatile
     private var klippyThread: Thread? = null
@@ -39,7 +42,15 @@ class KlipperHostService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, notification("Starting AndroidKlipper…"))
-        hostExecutor.execute { rebuildSessionsAndStart() }
+        if (startInProgress.compareAndSet(false, true)) {
+            hostExecutor.execute {
+                try {
+                    rebuildSessionsAndStart()
+                } finally {
+                    startInProgress.set(false)
+                }
+            }
+        }
         return START_STICKY
     }
 
