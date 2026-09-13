@@ -7,7 +7,8 @@ object ConfigRuntimePreparer {
     data class Prepared(
         val configFile: File,
         val runtimeDir: File,
-        val changes: List<String>
+        val changes: List<String>,
+        val mappedUsbIds: Set<String>
     )
 
     fun prepare(context: Context, usbSerialToPty: Map<String, String>): Prepared {
@@ -24,6 +25,7 @@ object ConfigRuntimePreparer {
         gcodeDir.mkdirs()
 
         val changes = mutableListOf<String>()
+        val mappedUsbIds = linkedSetOf<String>()
         runtimeDir.walkTopDown()
             .filter { it.isFile && it.extension.equals("cfg", ignoreCase = true) }
             .forEach { file ->
@@ -33,6 +35,7 @@ object ConfigRuntimePreparer {
                     val id = ref.usbSerialHint ?: return@mapNotNull null
                     val pty = usbSerialToPty[id] ?: return@mapNotNull null
                     changes += "${file.relativeTo(runtimeDir).path}: [${ref.section}] -> $pty (USB $id)"
+                    mappedUsbIds += id
                     ref.section to pty
                 }.toMap()
 
@@ -45,7 +48,7 @@ object ConfigRuntimePreparer {
                 file.writeText(rewritten)
             }
 
-        return Prepared(File(runtimeDir, "printer.cfg"), runtimeDir, changes)
+        return Prepared(File(runtimeDir, "printer.cfg"), runtimeDir, changes, mappedUsbIds)
     }
 
     private fun copyTree(source: File, dest: File) {
