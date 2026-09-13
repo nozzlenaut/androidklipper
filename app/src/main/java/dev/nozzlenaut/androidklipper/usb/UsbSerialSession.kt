@@ -1,10 +1,13 @@
 package dev.nozzlenaut.androidklipper.usb
 
 import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbRequest
 import com.hoho.android.usbserial.driver.UsbSerialDriver
+import com.hoho.android.usbserial.driver.CommonUsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -41,21 +44,47 @@ class UsbSerialSession(
         Thread.sleep(80)
         running.set(true)
 
-        // Use the usb-serial driver's own blocking read request. timeout=0
-        // means "wait until data arrives", so there is no short-timeout
-        // bulkTransfer polling and no extra UsbRequest competing with the
-        // CDC driver's request object. This is important for the STM32F446
-        // Klipper CDC device, which rejected a second queued read request.
+        // Reuse usb-serial-for-android's already-initialized read request but
+        // bypass CommonUsbSerialPort.read(timeout=0), because v3.11.0 sends a
+        // USB GET_STATUS control request whenever a blocking read completes
+        // with zero bytes. Klipper's STM32F446 CDC device on Fire OS rejects
+        // GET_STATUS even though its bulk endpoints remain valid.
         usbReader = Thread({
-            val buf = ByteArray(4096)
+            val commonPort = port as? CommonUsbSerialPort
+                ?: throw IOException("Unsupported USB serial port implementation: ${port.javaClass.name}")
+            val readRequestField = CommonUsbSerialPort::class.java
+                .getDeclaredField("mReadRequest")
+                .apply { isAccessible = true }
+            val request = readRequestField.get(commonPort) as? UsbRequest
+                ?: throw IOException("USB serial driver has no active read request")
+
+            val buffer = ByteBuffer.allocate(4096)
             try {
                 while (running.get()) {
-                    val n = port.read(buf, 0)
+                    buffer.clear()
+                    if (!request.queue(buffer, buffer.capacity())) {
+                        throw IOException("Unable to queue driver's USB read request")
+                    }
+                    val response = connection.requestWait()
                     if (!running.get()) break
+                    if (response == null) {
+                        throw IOException("USB read requestWait returned null")
+                    }
+                    if (response !== request) {
+                        throw IOException("Unexpected USB request completed")
+                    }
+
+                    val n = buffer.position()
                     if (n > 0) {
+                        buffer.flip()
+                        val data = ByteArray(n)
+                        buffer.get(data)
                         usbBytesIn.addAndGet(n.toLong())
-                        pty.write(buf.copyOf(n))
+                        pty.write(data)
                     } else {
+                        // Zero-byte USB completions are harmless on the Klipper
+                        // STM32 CDC endpoint. Requeue instead of probing it with
+                        // GET_STATUS (which Fire OS reports as a failure).
                         usbReadMisses.incrementAndGet()
                     }
                 }
