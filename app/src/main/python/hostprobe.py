@@ -62,7 +62,7 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
         nonlocal serial_reader
         try:
             serial_reader = serialhdl.SerialReader(r, mcu_name="android-probe")
-            serial_reader.connect_uart(path, int(baud))
+            serial_reader.connect_pipe(path)
             parser = serial_reader.get_msgparser()
             version, build = parser.get_version_info()
             constants = parser.get_constants()
