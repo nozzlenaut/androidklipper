@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string>
+#include <termios.h>
 
 static std::string make_result(int fd, const char* path) {
     return std::to_string(fd) + "\n" + std::string(path);
@@ -22,6 +23,29 @@ Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeCreate(JNIEnv* env, jclas
         close(master);
         return env->NewStringUTF("-1\n");
     }
+    // Klipper's pipe transport expects an 8-bit-clean byte stream. PTYs
+    // default to canonical terminal processing (echo, CR/LF translation,
+    // signal characters), so force the slave side into raw mode once.
+    int slave = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (slave < 0) {
+        close(master);
+        return env->NewStringUTF("-1\n");
+    }
+    struct termios tio{};
+    if (tcgetattr(slave, &tio) != 0) {
+        close(slave);
+        close(master);
+        return env->NewStringUTF("-1\n");
+    }
+    cfmakeraw(&tio);
+    tio.c_cflag |= CLOCAL | CREAD;
+    if (tcsetattr(slave, TCSANOW, &tio) != 0) {
+        close(slave);
+        close(master);
+        return env->NewStringUTF("-1\n");
+    }
+    close(slave);
+
     const std::string result = make_result(master, path);
     return env->NewStringUTF(result.c_str());
 }
