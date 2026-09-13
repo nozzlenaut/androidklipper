@@ -1,12 +1,10 @@
 package dev.nozzlenaut.androidklipper.usb
 
 import android.hardware.usb.UsbDeviceConnection
-import android.hardware.usb.UsbRequest
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import java.io.IOException
-import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -30,7 +28,6 @@ class UsbSerialSession(
     private lateinit var port: UsbSerialPort
     private var usbReader: Thread? = null
     private var ptyReader: Thread? = null
-    @Volatile private var readRequest: UsbRequest? = null
 
     fun start() {
         port = driver.ports.firstOrNull() ?: throw IOException("USB serial device has no ports")
@@ -44,39 +41,20 @@ class UsbSerialSession(
         Thread.sleep(80)
         running.set(true)
 
-        // Avoid repeated short-timeout bulkTransfer() reads. On older
-        // Android / Fire OS USB host stacks they can leave a CDC connection in
-        // a bad state after several idle timeouts. Keep one asynchronous USB
-        // request queued instead; it sleeps in the kernel until data arrives.
+        // Use the usb-serial driver's own blocking read request. timeout=0
+        // means "wait until data arrives", so there is no short-timeout
+        // bulkTransfer polling and no extra UsbRequest competing with the
+        // CDC driver's request object. This is important for the STM32F446
+        // Klipper CDC device, which rejected a second queued read request.
         usbReader = Thread({
-            val endpoint = port.readEndpoint
-            val request = UsbRequest()
-            if (!request.initialize(connection, endpoint)) {
-                throw IOException("Unable to initialize USB read request")
-            }
-            readRequest = request
-            val buffer = ByteBuffer.allocate(maxOf(4096, endpoint.maxPacketSize))
+            val buf = ByteArray(4096)
             try {
                 while (running.get()) {
-                    buffer.clear()
-                    if (!request.queue(buffer, buffer.capacity())) {
-                        throw IOException("Unable to queue USB read request")
-                    }
-                    val response = connection.requestWait()
+                    val n = port.read(buf, 0)
                     if (!running.get()) break
-                    if (response == null) {
-                        throw IOException("USB read requestWait returned null")
-                    }
-                    if (response !== request) {
-                        throw IOException("Unexpected USB request completed")
-                    }
-                    val n = buffer.position()
                     if (n > 0) {
-                        buffer.flip()
-                        val data = ByteArray(n)
-                        buffer.get(data)
                         usbBytesIn.addAndGet(n.toLong())
-                        pty.write(data)
+                        pty.write(buf.copyOf(n))
                     } else {
                         usbReadMisses.incrementAndGet()
                     }
@@ -86,9 +64,6 @@ class UsbSerialSession(
                     lastError = "USB read failed: ${t.message}"
                     onError(t)
                 }
-            } finally {
-                runCatching { request.cancel() }
-                readRequest = null
             }
         }, "usb-to-pty-${stableId.takeLast(8)}").also { it.start() }
 
@@ -181,9 +156,9 @@ class UsbSerialSession(
 
     override fun close() {
         running.set(false)
-        runCatching { readRequest?.cancel() }
         usbReader?.interrupt()
         ptyReader?.interrupt()
+        // Closing the port is what interrupts the blocking timeout=0 read.
         runCatching { port.close() }
         runCatching { pty.close() }
         runCatching { connection.close() }
