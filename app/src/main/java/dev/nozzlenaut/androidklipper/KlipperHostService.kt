@@ -112,6 +112,34 @@ class KlipperHostService : Service() {
             }
         }
 
+        // Before full Klippy, reproduce its first harmless protocol transition
+        // on each already-open bridge: identify, then get_config. This isolates
+        // Android USB transport from printer configuration and never moves,
+        // heats, or changes MCU configuration.
+        statusLines += "Transport preflight:"
+        for ((stableId, ptyPath) in usbSerialToPty) {
+            try {
+                val probe = hostprobe.callAttr(
+                    "probe_mcu_get_config",
+                    ptyPath,
+                    helper.absolutePath
+                ).toString()
+                statusLines += "$stableId: $probe"
+                Thread.sleep(80)
+            } catch (t: Throwable) {
+                publishStatus(
+                    buildString {
+                        append("TRANSPORT PREFLIGHT FAILED\n\n")
+                        append(statusLines.joinToString("\n"))
+                        append("\n")
+                        append("$stableId: ${t.javaClass.simpleName}: ${t.message}")
+                        append("\n\nReal Klippy was not started.")
+                    }
+                )
+                return
+            }
+        }
+
         val imported = File(filesDir, "printer_data/config-original/printer.cfg")
         if (!imported.isFile) {
             publishStatus(
