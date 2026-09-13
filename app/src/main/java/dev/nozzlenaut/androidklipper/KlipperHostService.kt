@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class KlipperHostService : Service() {
     private val sessions = CopyOnWriteArrayList<UsbSerialSession>()
+    private val bridgeErrors = CopyOnWriteArrayList<String>()
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
     private val hostExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "androidklipper-host").apply { isDaemon = true }
@@ -58,6 +59,7 @@ class KlipperHostService : Service() {
         stopKlippy()
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
+        bridgeErrors.clear()
 
         if (!Python.isStarted()) Python.start(AndroidPlatform(this))
         val python = Python.getInstance()
@@ -97,7 +99,9 @@ class KlipperHostService : Service() {
                     ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
                 val pty = PtyBridge.create()
                 val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
-                    publishStatus("USB bridge error for $stableId: ${error.message}")
+                    val detail = "USB bridge error for $stableId: ${error.message}"
+                    bridgeErrors += detail
+                    publishStatus(detail)
                 }
                 session.start()
                 sessions += session
@@ -215,6 +219,12 @@ class KlipperHostService : Service() {
             buildString {
                 append("Klippy did not reach ready.\n")
                 if (!threadError.isNullOrBlank()) append("Runtime: $threadError\n")
+                append("\nBridge telemetry:\n")
+                sessions.forEach { append(it.telemetry()); append("\n") }
+                if (bridgeErrors.isNotEmpty()) {
+                    append("Bridge errors:\n")
+                    bridgeErrors.forEach { append(it); append("\n") }
+                }
                 append("\nLast Klippy log lines:\n")
                 append(tail.ifBlank { "(log empty)" })
             }
