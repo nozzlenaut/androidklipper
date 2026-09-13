@@ -2,11 +2,9 @@ package dev.nozzlenaut.androidklipper.usb
 
 import android.hardware.usb.UsbDeviceConnection
 import com.hoho.android.usbserial.driver.UsbSerialDriver
-import com.hoho.android.usbserial.driver.CommonUsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import java.io.IOException
-import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -19,6 +17,7 @@ class UsbSerialSession(
 ) : AutoCloseable {
 
     private val running = AtomicBoolean(false)
+    private val usbReaderStarted = AtomicBoolean(false)
     private val usbBytesIn = AtomicLong(0)
     private val usbBytesOut = AtomicLong(0)
     private val ptyBytesIn = AtomicLong(0)
@@ -43,47 +42,12 @@ class UsbSerialSession(
         Thread.sleep(80)
         running.set(true)
 
-        // Use usb-serial-for-android's own protected read implementation,
-        // but explicitly disable its optional connection test. This preserves
-        // the driver's exact UsbRequest/buffer handling while preventing the
-        // GET_STATUS control transfer which Fire OS + this STM32 Klipper CDC
-        // device rejects after a zero-byte completion.
-        usbReader = Thread({
-            val commonPort = port as? CommonUsbSerialPort
-                ?: throw IOException("Unsupported USB serial port implementation: ${port.javaClass.name}")
-            val readMethod = CommonUsbSerialPort::class.java.getDeclaredMethod(
-                "read",
-                ByteArray::class.java,
-                Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-                Boolean::class.javaPrimitiveType
-            ).apply { isAccessible = true }
-
-            val buf = ByteArray(4096)
-            try {
-                while (running.get()) {
-                    val n = try {
-                        readMethod.invoke(commonPort, buf, buf.size, 0, false) as Int
-                    } catch (wrapped: InvocationTargetException) {
-                        throw (wrapped.targetException ?: wrapped)
-                    }
-                    if (!running.get()) break
-                    if (n > 0) {
-                        usbBytesIn.addAndGet(n.toLong())
-                        pty.write(buf.copyOf(n))
-                    } else {
-                        // Zero-byte completions are allowed; unlike the public
-                        // read() path we intentionally do not send GET_STATUS.
-                        usbReadMisses.incrementAndGet()
-                    }
-                }
-            } catch (t: Throwable) {
-                if (running.get()) {
-                    lastError = "USB read failed: ${t.message}"
-                    onError(t)
-                }
-            }
-        }, "usb-to-pty-${stableId.takeLast(8)}").also { it.start() }
+        // Deliberately do not start USB IN traffic yet. The known-good Phase 1
+        // path opened each MCU and immediately sent Klipper identify. Full Klippy
+        // spends several seconds parsing config first; repeatedly polling or
+        // queueing reads during that idle window is what consistently poisons
+        // the STM32 CDC connection on Fire OS. Start the reader only after the
+        // first outbound Klipper packet has successfully reached the MCU.
 
         ptyReader = Thread({
             val buf = ByteArray(4096)
@@ -93,6 +57,7 @@ class UsbSerialSession(
                     if (n > 0) {
                         ptyBytesIn.addAndGet(n.toLong())
                         writeFully(buf, n)
+                        ensureUsbReaderStarted()
                     }
                 } catch (t: Throwable) {
                     if (running.get()) onError(t)
@@ -102,50 +67,57 @@ class UsbSerialSession(
         }, "pty-to-usb-${stableId.takeLast(8)}").also { it.start() }
     }
 
+    private fun ensureUsbReaderStarted() {
+        if (!usbReaderStarted.compareAndSet(false, true)) return
+
+        // This is intentionally the exact direct-bulk read strategy which
+        // successfully identified all three real Klipper MCUs in Phase 1.
+        // It begins only after the first host->MCU packet is accepted, so the
+        // STM32 never sits through config parsing with an idle IN transfer.
+        usbReader = Thread({
+            val buf = ByteArray(4096)
+            while (running.get()) {
+                try {
+                    val n = connection.bulkTransfer(
+                        port.readEndpoint,
+                        buf,
+                        buf.size,
+                        250
+                    )
+                    if (n > 0) {
+                        usbBytesIn.addAndGet(n.toLong())
+                        pty.write(buf.copyOf(n))
+                    } else {
+                        usbReadMisses.incrementAndGet()
+                    }
+                } catch (t: Throwable) {
+                    if (running.get()) {
+                        lastError = "USB read failed: ${t.message}"
+                        onError(t)
+                    }
+                    break
+                }
+            }
+        }, "usb-to-pty-${stableId.takeLast(8)}").also { it.start() }
+    }
+
     private fun writeFully(source: ByteArray, length: Int) {
-        var offset = 0
-        var transientFailures = 0
-
-        while (running.get() && offset < length) {
-            val remaining = length - offset
-            val chunk = if (offset == 0 && remaining == source.size) {
-                source
-            } else {
-                source.copyOfRange(offset, length)
-            }
-
-            val written = synchronized(globalUsbWriteLock) {
-                connection.bulkTransfer(
-                    port.writeEndpoint,
-                    chunk,
-                    remaining,
-                    500
-                )
-            }
-
-            usbWriteCalls.incrementAndGet()
-            if (written > 0) {
-                usbBytesOut.addAndGet(written.toLong())
-                offset += written
-                transientFailures = 0
-                continue
-            }
-
-            // Android bulkTransfer() returns -1 for both a timeout and some
-            // transient controller conditions. A single -1 does not mean the
-            // Klipper MCU disappeared, so retry briefly before failing the link.
-            transientFailures++
-            usbWriteRetries.incrementAndGet()
-            if (transientFailures >= 8) {
-                val msg = "USB bulk write failed after retries: wrote $offset of $length bytes"
-                lastError = msg
-                throw IOException(msg)
-            }
-            Thread.sleep((transientFailures * 10L).coerceAtMost(50L))
-        }
-
-        if (offset != length && running.get()) {
-            throw IOException("USB bulk write incomplete: wrote $offset of $length bytes")
+        // Klipper's initial packets are smaller than a USB max packet. Match
+        // the known-good Phase 1 write path instead of issuing a sequence of
+        // short retries which can further disturb Fire OS' USB host state.
+        usbWriteCalls.incrementAndGet()
+        val written = connection.bulkTransfer(
+            port.writeEndpoint,
+            source,
+            length,
+            2000
+        )
+        if (written > 0) usbBytesOut.addAndGet(written.toLong())
+        if (written != length) {
+            if (written <= 0) usbWriteRetries.incrementAndGet()
+            val msg = "USB bulk write failed: wrote $written of $length bytes"
+            lastError = msg
+            throw IOException(msg)
         }
     }
 
