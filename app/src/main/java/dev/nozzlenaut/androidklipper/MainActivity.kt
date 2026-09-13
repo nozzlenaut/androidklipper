@@ -53,7 +53,7 @@ class MainActivity : Activity() {
         }
         status = TextView(this).apply {
             text = HostStatusStore.load(this@MainActivity)
-                ?: "Plug the printer into USB OTG, then scan."
+                ?: "Plug the printer into USB OTG, then tap Start Klipper Host."
             textSize = 15f
             setPadding(0, 24, 0, 24)
         }
@@ -62,11 +62,11 @@ class MainActivity : Activity() {
             setOnClickListener { requestUsbPermissionsAndStart() }
         }
         val copy = Button(this).apply {
-            text = "Copy diagnostic report"
+            text = "Copy diagnostics"
             setOnClickListener { copyReport() }
         }
         val stop = Button(this).apply {
-            text = "Stop host test"
+            text = "Stop host"
             setOnClickListener {
                 stopService(Intent(this@MainActivity, KlipperHostService::class.java))
                 status.text = "Host stopped. The tablet can be used normally."
