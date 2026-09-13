@@ -1,13 +1,12 @@
 package dev.nozzlenaut.androidklipper.usb
 
 import android.hardware.usb.UsbDeviceConnection
-import android.hardware.usb.UsbRequest
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.CommonUsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import java.io.IOException
-import java.nio.ByteBuffer
+import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -44,47 +43,37 @@ class UsbSerialSession(
         Thread.sleep(80)
         running.set(true)
 
-        // Reuse usb-serial-for-android's already-initialized read request but
-        // bypass CommonUsbSerialPort.read(timeout=0), because v3.11.0 sends a
-        // USB GET_STATUS control request whenever a blocking read completes
-        // with zero bytes. Klipper's STM32F446 CDC device on Fire OS rejects
-        // GET_STATUS even though its bulk endpoints remain valid.
+        // Use usb-serial-for-android's own protected read implementation,
+        // but explicitly disable its optional connection test. This preserves
+        // the driver's exact UsbRequest/buffer handling while preventing the
+        // GET_STATUS control transfer which Fire OS + this STM32 Klipper CDC
+        // device rejects after a zero-byte completion.
         usbReader = Thread({
             val commonPort = port as? CommonUsbSerialPort
                 ?: throw IOException("Unsupported USB serial port implementation: ${port.javaClass.name}")
-            val readRequestField = CommonUsbSerialPort::class.java
-                .getDeclaredField("mReadRequest")
-                .apply { isAccessible = true }
-            val request = readRequestField.get(commonPort) as? UsbRequest
-                ?: throw IOException("USB serial driver has no active read request")
+            val readMethod = CommonUsbSerialPort::class.java.getDeclaredMethod(
+                "read",
+                ByteArray::class.java,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType
+            ).apply { isAccessible = true }
 
-            val buffer = ByteBuffer.allocate(4096)
+            val buf = ByteArray(4096)
             try {
                 while (running.get()) {
-                    buffer.clear()
-                    if (!request.queue(buffer, buffer.capacity())) {
-                        throw IOException("Unable to queue driver's USB read request")
+                    val n = try {
+                        readMethod.invoke(commonPort, buf, buf.size, 0, false) as Int
+                    } catch (wrapped: InvocationTargetException) {
+                        throw (wrapped.targetException ?: wrapped)
                     }
-                    val response = connection.requestWait()
                     if (!running.get()) break
-                    if (response == null) {
-                        throw IOException("USB read requestWait returned null")
-                    }
-                    if (response !== request) {
-                        throw IOException("Unexpected USB request completed")
-                    }
-
-                    val n = buffer.position()
                     if (n > 0) {
-                        buffer.flip()
-                        val data = ByteArray(n)
-                        buffer.get(data)
                         usbBytesIn.addAndGet(n.toLong())
-                        pty.write(data)
+                        pty.write(buf.copyOf(n))
                     } else {
-                        // Zero-byte USB completions are harmless on the Klipper
-                        // STM32 CDC endpoint. Requeue instead of probing it with
-                        // GET_STATUS (which Fire OS reports as a failure).
+                        // Zero-byte completions are allowed; unlike the public
+                        // read() path we intentionally do not send GET_STATUS.
                         usbReadMisses.incrementAndGet()
                     }
                 }
