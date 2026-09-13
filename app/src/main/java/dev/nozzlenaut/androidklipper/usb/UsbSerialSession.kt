@@ -79,12 +79,14 @@ class UsbSerialSession(
                 source.copyOfRange(offset, length)
             }
 
-            val written = connection.bulkTransfer(
-                port.writeEndpoint,
-                chunk,
-                remaining,
-                250
-            )
+            val written = synchronized(globalUsbWriteLock) {
+                connection.bulkTransfer(
+                    port.writeEndpoint,
+                    chunk,
+                    remaining,
+                    500
+                )
+            }
 
             if (written > 0) {
                 offset += written
@@ -107,6 +109,14 @@ class UsbSerialSession(
         if (offset != length && running.get()) {
             throw IOException("USB bulk write incomplete: wrote $offset of $length bytes")
         }
+    }
+
+    companion object {
+        // Older Android / Fire OS USB host stacks can behave poorly when
+        // several UsbDeviceConnection bulk OUT calls are issued concurrently.
+        // Klipper packets are tiny, so serializing writes adds negligible
+        // latency while preserving independent read threads for all MCUs.
+        private val globalUsbWriteLock = Any()
     }
 
     override fun close() {
