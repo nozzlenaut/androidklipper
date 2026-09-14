@@ -6,7 +6,10 @@ required = [
     "app/src/main/AndroidManifest.xml",
     "app/src/main/cpp/pty_bridge.cpp",
     "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt",
+    "app/src/main/java/dev/nozzlenaut/androidklipper/LocalStatusServer.kt",
+    "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt",
     "app/src/main/python/hostprobe.py",
+    "scripts/patch-klipper.py",
     "scripts/vendor-klipper.sh",
 ]
 for rel in required:
@@ -31,5 +34,25 @@ expected = [
 ]
 for name in expected:
     assert name in cmake, f"c_helper source missing from CMake: {name}"
+
+usb_session = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt").read_text()
+assert "port.dtr = true" not in usb_session
+assert "port.rts = true" not in usb_session
+
+hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
+assert "exclusive=False" in hostprobe
+assert "serial_reader.connect_pipe(path)" in hostprobe
+assert "serial_reader.connect_uart(path" not in hostprobe
+
+patcher = (root / "scripts/patch-klipper.py").read_text()
+assert "serialport.startswith('/dev/pts/')" in patcher
+assert "return self.connect_pipe(serialport)" in patcher
+
+vendor = (root / "scripts/vendor-klipper.sh").read_text()
+assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
+
+status_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/LocalStatusServer.kt").read_text()
+assert "fun start(port: Int = 7715)" in status_server
+assert "7125" not in status_server
 
 print("project invariants: PASS")
