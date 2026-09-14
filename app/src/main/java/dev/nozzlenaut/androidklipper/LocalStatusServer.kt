@@ -14,7 +14,7 @@ class LocalStatusServer(
     }
     @Volatile private var server: ServerSocket? = null
 
-    fun start(port: Int = 7125) {
+    fun start(port: Int = 7715) {
         if (server != null) return
         val socket = ServerSocket().apply {
             reuseAddress = true
