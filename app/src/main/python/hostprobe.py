@@ -9,9 +9,12 @@ def _klippy_path():
 
 
 def probe_serial(path, baud=115200):
-    """Harmlessly prove embedded Python + pySerial can exclusively open a PTY."""
+    """Harmlessly prove embedded Python + pySerial can open an Android PTY."""
     import serial
-    port = serial.Serial(port=None, baudrate=baud, timeout=0, exclusive=True)
+    # Android PTYs reject pySerial's TIOCEXCL ioctl with EACCES. The native
+    # bridge already owns the physical USB device, so an extra PTY lock is
+    # unnecessary here.
+    port = serial.Serial(port=None, baudrate=baud, timeout=0, exclusive=False)
     port.port = path
     port.open()
     port.close()
@@ -62,7 +65,9 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
         nonlocal serial_reader
         try:
             serial_reader = serialhdl.SerialReader(r, mcu_name="android-probe")
-            serial_reader.connect_uart(path, int(baud))
+            # The Kotlin USB bridge owns/configures the physical UART. Klipper
+            # should treat its PTY endpoint as a byte pipe, not a hardware UART.
+            serial_reader.connect_pipe(path)
             parser = serial_reader.get_msgparser()
             version, build = parser.get_version_info()
             constants = parser.get_constants()
