@@ -24,10 +24,12 @@ class KlipperHostService : Service() {
     private val hostExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "androidklipper-host").apply { isDaemon = true }
     }
+    private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        statusServer.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -110,6 +112,7 @@ class KlipperHostService : Service() {
     }
 
     private fun publishStatus(text: String) {
+        HostStatusStore.save(this, text)
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(NOTIFICATION_ID, notification(text.lineSequence().firstOrNull() ?: "AndroidKlipper"))
         sendBroadcast(Intent(ACTION_STATUS).apply {
@@ -146,6 +149,7 @@ class KlipperHostService : Service() {
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
         hostExecutor.shutdownNow()
+        statusServer.close()
         super.onDestroy()
     }
 
