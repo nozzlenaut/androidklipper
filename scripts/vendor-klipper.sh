@@ -16,6 +16,8 @@ cp -a "$VENDOR/klippy" "$PY_VENDOR/"
 touch "$PY_VENDOR/__init__.py"
 printf '%s\n' "$KLIPPER_COMMIT" > "$PY_VENDOR/KLIPPER_COMMIT"
 
-python3 "$ROOT/scripts/patch-klipper.py" "$PY_VENDOR/klippy/chelper/__init__.py"
+python3 "$ROOT/scripts/patch-klipper.py" \
+  "$PY_VENDOR/klippy/chelper/__init__.py" \
+  "$PY_VENDOR/klippy/serialhdl.py"
 
 echo "Vendored Klipper $KLIPPER_COMMIT"
