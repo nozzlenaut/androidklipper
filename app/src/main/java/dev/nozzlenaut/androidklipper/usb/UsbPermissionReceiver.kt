@@ -10,7 +10,16 @@ class UsbPermissionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_USB_PERMISSION) return
         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-        if (granted) KlipperHostService.start(context)
+        if (!granted) return
+
+        // Permission dialogs for multi-MCU printers arrive independently. Do
+        // not rebuild/reopen every USB session after each callback; wait until
+        // all supported devices are granted, then start the host once.
+        val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val supported = manager.deviceList.values.filter { UsbDeviceScanner.isSupported(it) }
+        if (supported.isNotEmpty() && supported.all { manager.hasPermission(it) }) {
+            KlipperHostService.start(context)
+        }
     }
 
     companion object {
