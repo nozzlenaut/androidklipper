@@ -45,6 +45,15 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      # Keep the generated debug signing key stable across CI runs. This is a
+      # development-only key, but caching it lets later APKs update in place
+      # instead of forcing an uninstall/reinstall every build.
+      - name: Restore debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: androidklipper-debug-keystore-v1
+
       - name: Vendor pinned Klipper
         run: bash scripts/vendor-klipper.sh
 
