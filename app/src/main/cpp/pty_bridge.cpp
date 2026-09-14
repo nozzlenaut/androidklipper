@@ -3,6 +3,7 @@
 #include <poll.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <termios.h>
 #include <string>
 
 static std::string make_result(int fd, const char* path) {
@@ -22,6 +23,29 @@ Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeCreate(JNIEnv* env, jclas
         close(master);
         return env->NewStringUTF("-1\n");
     }
+    // Klipper exchanges binary protocol bytes. PTYs default to terminal
+    // processing (canonical mode, echo, CR/LF transforms), so make the slave
+    // byte-transparent before Python ever opens it.
+    int slave = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (slave < 0) {
+        close(master);
+        return env->NewStringUTF("-1\n");
+    }
+    struct termios tio{};
+    if (tcgetattr(slave, &tio) != 0) {
+        close(slave);
+        close(master);
+        return env->NewStringUTF("-1\n");
+    }
+    cfmakeraw(&tio);
+    tio.c_cflag |= CLOCAL | CREAD;
+    if (tcsetattr(slave, TCSANOW, &tio) != 0) {
+        close(slave);
+        close(master);
+        return env->NewStringUTF("-1\n");
+    }
+    close(slave);
+
     const std::string result = make_result(master, path);
     return env->NewStringUTF(result.c_str());
 }
