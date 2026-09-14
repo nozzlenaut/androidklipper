@@ -10,7 +10,6 @@ object ConfigRewriter {
 
     private val sectionRegex = Regex("^\\s*\\[(mcu(?:\\s+[^]]+)?)\\]\\s*$", RegexOption.IGNORE_CASE)
     private val serialRegex = Regex("^(\\s*)serial\\s*:\\s*(\\S+)\\s*$", RegexOption.IGNORE_CASE)
-    private val baudRegex = Regex("^\\s*baud\\s*:", RegexOption.IGNORE_CASE)
 
     fun extractUsbMcuRefs(text: String): List<McuRef> {
         val out = mutableListOf<McuRef>()
@@ -35,47 +34,33 @@ object ConfigRewriter {
 
     fun rewriteForRuntime(
         text: String,
-        mapping: Map<String, String>,
-        ptyBaud: Int = 115200
+        mapping: Map<String, String>
     ): String {
         val out = mutableListOf<String>()
         var section: String? = null
-        var rewrittenCurrentSection = false
-        var currentHasBaud = false
-
-        fun flushBaudIfNeeded() {
-            if (rewrittenCurrentSection && !currentHasBaud) out += "baud: $ptyBaud"
-            rewrittenCurrentSection = false
-            currentHasBaud = false
-        }
 
         text.lines().forEach { line ->
             val sec = sectionRegex.matchEntire(line)
             if (sec != null) {
-                flushBaudIfNeeded()
                 section = sec.groupValues[1]
                 out += line
                 return@forEach
             }
             if (line.trimStart().startsWith("[")) {
-                flushBaudIfNeeded()
                 section = null
                 out += line
                 return@forEach
             }
 
             val active = section
-            if (active != null && baudRegex.containsMatchIn(line)) currentHasBaud = true
             val serial = if (active != null) serialRegex.matchEntire(line) else null
             val target = active?.let { mapping[it] }
             if (serial != null && target != null) {
                 out += "${serial.groupValues[1]}serial: $target"
-                rewrittenCurrentSection = true
             } else {
                 out += line
             }
         }
-        flushBaudIfNeeded()
         return out.joinToString("\n")
     }
 
