@@ -25,8 +25,10 @@ class UsbSerialSession(
         port = driver.ports.firstOrNull() ?: throw IOException("USB serial device has no ports")
         port.open(connection)
         port.setParameters(250000, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-        runCatching { port.dtr = true }
-        runCatching { port.rts = true }
+
+        // Do not assert DTR/RTS during diagnostics. Some printer controllers tie
+        // control-line changes to reset/boot circuitry, so touching them can cause
+        // observable hardware state changes even when no Klipper GPIO command is sent.
 
         running.set(true)
         ioManager = SerialInputOutputManager(port, this).apply {
