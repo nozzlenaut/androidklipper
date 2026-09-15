@@ -27,7 +27,7 @@ class ConfigRewriterTest {
         )
         assertTrue(rewritten.contains("serial: /dev/pts/3"))
         assertTrue(rewritten.contains("serial: /dev/pts/4"))
-        assertEquals(2, Regex("baud: 115200").findAll(rewritten).count())
+        assertEquals(0, Regex("baud: 115200").findAll(rewritten).count())
     }
 
     @Test
