@@ -14,11 +14,12 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
 - [x] embedded Python/pySerial probe
 - [x] NDK build definition for Klipper c_helper
 - [x] runtime-only config rewriter + unit test
-- [ ] CI produces installable APK
-- [ ] Fire HD 8: 3 MCUs visible with stable serial IDs
-- [ ] Fire HD 8: 3 PTYs created simultaneously
+- [x] CI produces installable APK
+- [x] Fire HD 8: 3 USB MCUs visible simultaneously
+- [ ] Fire HD 8: stable USB serial IDs confirmed in final native-app report
+- [x] Fire HD 8: 3 PTYs created simultaneously
 - [ ] Fire HD 8: pySerial opens all PTYs
-- [ ] Fire HD 8: prebuilt c_helper loads through cffi
+- [x] Fire HD 8: prebuilt c_helper loads through cffi
 
 ## M2 - run real Klippy inside the app
 
