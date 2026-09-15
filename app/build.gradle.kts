@@ -1,3 +1,5 @@
+val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,8 +15,8 @@ android {
         applicationId = "dev.nozzlenaut.androidklipper"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.1-poc"
+        versionCode = ciRunNumber ?: 1
+        versionName = if (ciRunNumber != null) "0.0.1-poc-ci$ciRunNumber" else "0.0.1-poc-local"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
