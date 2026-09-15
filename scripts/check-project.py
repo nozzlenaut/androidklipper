@@ -50,7 +50,9 @@ permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/u
 assert "supported.all { manager.hasPermission(it) }" in permission_receiver
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
-assert "exclusive=False" in hostprobe
+assert "def probe_pipe_open(path):" in hostprobe
+assert "os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)" in hostprobe
+assert "serial.Serial(" not in hostprobe
 assert "serial_reader.connect_pipe(path)" in hostprobe
 assert "serial_reader.connect_uart(path" not in hostprobe
 
