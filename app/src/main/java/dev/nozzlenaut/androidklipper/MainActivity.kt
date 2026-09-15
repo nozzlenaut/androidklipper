@@ -41,7 +41,7 @@ class MainActivity : Activity() {
             setPadding(32, 32, 32, 32)
         }
         val heading = TextView(this).apply {
-            text = "AndroidKlipper host proof-of-concept"
+            text = "AndroidKlipper " + BuildConfig.VERSION_NAME
             textSize = 22f
             gravity = Gravity.CENTER_HORIZONTAL
         }
@@ -160,7 +160,7 @@ class MainActivity : Activity() {
         if (requested == 0) {
             KlipperHostService.start(this)
         } else {
-            status.text = "Grant USB permission for each printer MCU. The host test starts as permissions arrive."
+            status.text = "Grant USB permission for each printer MCU. The host test starts after all supported MCUs are granted."
         }
     }
 }
