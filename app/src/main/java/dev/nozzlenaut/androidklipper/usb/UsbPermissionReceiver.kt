@@ -13,8 +13,15 @@ class UsbPermissionReceiver : BroadcastReceiver() {
         if (intent.action != ACTION_USB_PERMISSION) return
         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
         if (!granted) return
-        val fullSmoke = intent.getBooleanExtra(KlipperHostService.EXTRA_FULL_SMOKE, false)
-        val realConfig = intent.getBooleanExtra(KlipperHostService.EXTRA_REAL_CONFIG, false)
+        val prefs = context.getSharedPreferences("usb_permission_mode", Context.MODE_PRIVATE)
+        val fullSmoke = prefs.getBoolean(
+            KlipperHostService.EXTRA_FULL_SMOKE,
+            intent.getBooleanExtra(KlipperHostService.EXTRA_FULL_SMOKE, false)
+        )
+        val realConfig = prefs.getBoolean(
+            KlipperHostService.EXTRA_REAL_CONFIG,
+            intent.getBooleanExtra(KlipperHostService.EXTRA_REAL_CONFIG, false)
+        )
 
         // Fire OS serializes USB permission dialogs. Chain the requests one at
         // a time so a single user action on the AndroidKlipper button walks
@@ -26,6 +33,7 @@ class UsbPermissionReceiver : BroadcastReceiver() {
             requestNext(context, manager, next, fullSmoke, realConfig)
         } else if (supported.isNotEmpty()) {
             KlipperHostService.start(context, fullSmoke, realConfig)
+            prefs.edit().clear().apply()
         }
     }
 
