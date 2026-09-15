@@ -18,7 +18,7 @@ class LocalStatusServer(
         if (server != null) return
         val socket = ServerSocket().apply {
             reuseAddress = true
-            bind(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
+            bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port))
         }
         server = socket
         executor.execute {
