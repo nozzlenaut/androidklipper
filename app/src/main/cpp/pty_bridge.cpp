@@ -90,8 +90,12 @@ Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeWrite(
     ssize_t total = 0;
     while (total < len) {
         const ssize_t n = write(fd, bytes + total, static_cast<size_t>(len - total));
-        if (n <= 0) break;
-        total += n;
+        if (n > 0) {
+            total += n;
+            continue;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        break;
     }
     env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
     return static_cast<jint>(total);
