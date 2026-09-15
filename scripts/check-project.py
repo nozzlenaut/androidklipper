@@ -49,15 +49,22 @@ assert "errno == EIO" in pty_bridge
 permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbPermissionReceiver.kt").read_text()
 assert "supported.all { manager.hasPermission(it) }" in permission_receiver
 assert "KlipperHostService.EXTRA_FULL_SMOKE" in permission_receiver
+assert "KlipperHostService.EXTRA_REAL_CONFIG" in permission_receiver
 
 main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
 assert "Run full Klippy no-pin smoke test" in main_activity
 assert "requestUsbPermissionsAndStart(fullSmoke = true)" in main_activity
+assert "Import NUC config + run real Voron startup test" in main_activity
+assert "realConfig = true" in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "EXTRA_FULL_SMOKE" in host_service
+assert "EXTRA_REAL_CONFIG" in host_service
 assert 'smokePtyPaths.joinToString("|")' in host_service
+assert "stablePtyMap" in host_service
 assert "probe_full_klippy" in host_service
+assert "probe_real_config_from_moonraker" in host_service
+assert "http://192.168.1.83:7125" in host_service
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "def probe_pipe_open(path):" in hostprobe
@@ -68,6 +75,14 @@ assert "serial_reader.connect_uart(path" not in hostprobe
 assert "import extras.error_mcu" in hostprobe
 assert "import kinematics.none" in hostprobe
 assert "def probe_full_klippy(pty_paths, c_helper_path, work_dir):" in hostprobe
+assert "def probe_real_config_from_moonraker(" in hostprobe
+assert "3F001E001450535556323420" in hostprobe
+assert "3033393834057C77" in hostprobe
+assert "504450610844C31C" in hostprobe
+assert "temperature_sensor NUC" in hostprobe
+assert "K-ShakeTune" in hostprobe
+assert "~/printer_data/gcodes" in hostprobe
+assert "~/printer_data/config/variables" in hostprobe
 assert '"kinematics: none"' in hostprobe
 assert '"max_velocity: 1"' in hostprobe
 assert '"max_accel: 1"' in hostprobe
