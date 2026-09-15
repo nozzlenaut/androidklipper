@@ -1,8 +1,10 @@
 package dev.nozzlenaut.androidklipper.usb
 
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import dev.nozzlenaut.androidklipper.KlipperHostService
 
@@ -14,17 +16,41 @@ class UsbPermissionReceiver : BroadcastReceiver() {
         val fullSmoke = intent.getBooleanExtra(KlipperHostService.EXTRA_FULL_SMOKE, false)
         val realConfig = intent.getBooleanExtra(KlipperHostService.EXTRA_REAL_CONFIG, false)
 
-        // Permission dialogs for multi-MCU printers arrive independently. Do
-        // not rebuild/reopen every USB session after each callback; wait until
-        // all supported devices are granted, then start the host once.
+        // Fire OS serializes USB permission dialogs. Chain the requests one at
+        // a time so a single user action on the AndroidKlipper button walks
+        // through every MCU and starts the host automatically at the end.
         val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
         val supported = manager.deviceList.values.filter { UsbDeviceScanner.isSupported(it) }
-        if (supported.isNotEmpty() && supported.all { manager.hasPermission(it) }) {
+        val next = supported.firstOrNull { !manager.hasPermission(it) }
+        if (next != null) {
+            requestNext(context, manager, next, fullSmoke, realConfig)
+        } else if (supported.isNotEmpty()) {
             KlipperHostService.start(context, fullSmoke, realConfig)
         }
     }
 
     companion object {
         const val ACTION_USB_PERMISSION = "dev.nozzlenaut.androidklipper.USB_PERMISSION"
+
+        fun requestNext(
+            context: Context,
+            manager: UsbManager,
+            device: UsbDevice,
+            fullSmoke: Boolean,
+            realConfig: Boolean
+        ) {
+            val callback = Intent(context, UsbPermissionReceiver::class.java).apply {
+                action = ACTION_USB_PERMISSION
+                putExtra(KlipperHostService.EXTRA_FULL_SMOKE, fullSmoke)
+                putExtra(KlipperHostService.EXTRA_REAL_CONFIG, realConfig)
+            }
+            val pending = PendingIntent.getBroadcast(
+                context,
+                1000 + (device.deviceId and 0x3fffffff),
+                callback,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            )
+            manager.requestPermission(device, pending)
+        }
     }
 }
