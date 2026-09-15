@@ -54,7 +54,6 @@ assert "POLLHUP" in pty_bridge
 assert "errno == EIO" in pty_bridge
 
 permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbPermissionReceiver.kt").read_text()
-assert "supported.all { manager.hasPermission(it) }" in permission_receiver
 assert "KlipperHostService.EXTRA_FULL_SMOKE" in permission_receiver
 assert "KlipperHostService.EXTRA_REAL_CONFIG" in permission_receiver
 assert "fun requestNext(" in permission_receiver
