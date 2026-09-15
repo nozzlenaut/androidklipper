@@ -29,7 +29,7 @@ class KlipperHostService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        statusServer.start()
+        runCatching { statusServer.start() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
