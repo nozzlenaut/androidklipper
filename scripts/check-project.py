@@ -39,6 +39,13 @@ usb_session = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSe
 assert "port.dtr = true" not in usb_session
 assert "port.rts = true" not in usb_session
 
+pty_bridge = (root / "app/src/main/cpp/pty_bridge.cpp").read_text()
+assert "cfmakeraw" in pty_bridge
+assert "tcsetattr" in pty_bridge
+
+permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbPermissionReceiver.kt").read_text()
+assert "supported.all { manager.hasPermission(it) }" in permission_receiver
+
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "exclusive=False" in hostprobe
 assert "serial_reader.connect_pipe(path)" in hostprobe
@@ -54,5 +61,9 @@ assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
 status_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/LocalStatusServer.kt").read_text()
 assert "fun start(port: Int = 7715)" in status_server
 assert "7125" not in status_server
+
+rewriter = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/config/ConfigRewriter.kt").read_text()
+assert "ptyBaud" not in rewriter
+assert 'out += "baud:' not in rewriter
 
 print("project invariants: PASS")
