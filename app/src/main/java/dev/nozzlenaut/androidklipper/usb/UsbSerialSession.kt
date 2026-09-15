@@ -17,43 +17,62 @@ class UsbSerialSession(
 ) : SerialInputOutputManager.Listener, AutoCloseable {
 
     private val running = AtomicBoolean(false)
-    private lateinit var port: UsbSerialPort
-    private lateinit var ioManager: SerialInputOutputManager
+    private var port: UsbSerialPort? = null
+    private var ioManager: SerialInputOutputManager? = null
     private var ptyReader: Thread? = null
 
     fun start() {
-        port = driver.ports.firstOrNull() ?: throw IOException("USB serial device has no ports")
-        port.open(connection)
-        port.setParameters(250000, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        try {
+            val serialPort = driver.ports.firstOrNull()
+                ?: throw IOException("USB serial device has no ports")
+            port = serialPort
+            serialPort.open(connection)
+            serialPort.setParameters(
+                250000,
+                8,
+                UsbSerialPort.STOPBITS_1,
+                UsbSerialPort.PARITY_NONE
+            )
 
-        // Do not assert DTR/RTS during diagnostics. Some printer controllers tie
-        // control-line changes to reset/boot circuitry, so touching them can cause
-        // observable hardware state changes even when no Klipper GPIO command is sent.
+            // Do not assert DTR/RTS. Some printer controllers tie control-line
+            // changes to reset/boot circuitry, so touching them can cause
+            // observable hardware state changes even without Klipper GPIO.
+            running.set(true)
 
-        running.set(true)
-        ioManager = SerialInputOutputManager(port, this).apply {
-            setReadBufferSize(4096)
-            setWriteBufferSize(4096)
-            start()
-        }
-
-        ptyReader = Thread({
-            val buf = ByteArray(4096)
-            while (running.get()) {
-                try {
-                    val n = pty.read(buf, 250)
-                    if (n > 0) port.write(buf, n, 2000)
-                } catch (t: Throwable) {
-                    if (running.get()) onError(t)
-                    break
-                }
+            val manager = SerialInputOutputManager(serialPort, this).apply {
+                setReadBufferSize(4096)
+                setWriteBufferSize(4096)
+                start()
             }
-        }, "pty-to-usb-${stableId.takeLast(8)}").also { it.start() }
+            ioManager = manager
+
+            ptyReader = Thread({
+                val buf = ByteArray(4096)
+                while (running.get()) {
+                    try {
+                        val n = pty.read(buf, 250)
+                        if (n > 0) serialPort.write(buf, n, 2000)
+                    } catch (t: Throwable) {
+                        if (running.get()) onError(t)
+                        break
+                    }
+                }
+            }, "pty-to-usb-${stableId.takeLast(8)}").also { it.start() }
+        } catch (t: Throwable) {
+            // A failed setParameters/open must never leave a claimed USB
+            // interface or PTY behind. Leaked half-open sessions can make the
+            // next Android USB attempt fail until the printer is power-cycled.
+            close()
+            throw t
+        }
     }
 
     override fun onNewData(data: ByteArray) {
         try {
-            pty.write(data)
+            val written = pty.write(data)
+            if (written != data.size) {
+                throw IOException("PTY write incomplete: wrote $written of ${data.size} bytes")
+            }
         } catch (t: Throwable) {
             if (running.get()) onError(t)
         }
@@ -65,9 +84,12 @@ class UsbSerialSession(
 
     override fun close() {
         running.set(false)
-        runCatching { ioManager.stop() }
-        runCatching { port.close() }
+        runCatching { ioManager?.stop() }
+        ioManager = null
+        runCatching { port?.close() }
+        port = null
         ptyReader?.interrupt()
+        ptyReader = null
         runCatching { pty.close() }
         runCatching { connection.close() }
     }
