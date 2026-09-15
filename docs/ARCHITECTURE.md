@@ -31,14 +31,17 @@ Each USB MCU gets its own PTY. This fixes the single-device limitation of the Oc
 
 VID/PID is not sufficient. Multiple Klipper MCUs commonly advertise the same VID/PID. AndroidKlipper reads the USB serial descriptor after permission is granted and uses that as the primary stable identifier. If a device exposes no serial descriptor, the app must fall back to a user-confirmed mapping rather than silently guessing.
 
-## Baud-rate split
+## USB / PTY transport
 
-For the first USB-only milestone, the Android USB side and PTY side are intentionally decoupled:
+For the USB-only milestone, Android owns the physical serial device and Klipper sees a byte-transparent PTY:
 
-- physical Klipper USB serial: 250000
-- PTY presented to pySerial/Klipper: 115200
+- physical Klipper USB serial: opened/configured by usb-serial-for-android at 250000
+- PTY: explicitly placed in raw mode; no terminal echo, canonical processing, or CR/LF translation
+- Klipper: a tiny Android patch redirects `/dev/pts/*` from `connect_uart()` to `connect_pipe()`
 
-The runtime config copy can inject `baud: 115200` for bridged serial MCU sections. Once Klipper identifies the MCU, its protocol dictionary supplies the wire frequency used for protocol timing. Before supporting USB-to-UART adapters generally, baud/control-line propagation needs a real implementation.
+This is deliberate. The PTY is not a second hardware UART, so Klipper must not apply pySerial exclusive locks, RTS/DTR changes, baud changes, or programmer-reset sequences to it. Runtime config copies only rewrite the serial path; they do not inject a synthetic PTY baud.
+
+Before supporting USB-to-UART adapters generally, baud/control-line propagation needs a real implementation on the Android USB side.
 
 ## Klipper native helper
 
