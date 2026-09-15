@@ -48,6 +48,16 @@ assert "errno == EIO" in pty_bridge
 
 permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbPermissionReceiver.kt").read_text()
 assert "supported.all { manager.hasPermission(it) }" in permission_receiver
+assert "KlipperHostService.EXTRA_FULL_SMOKE" in permission_receiver
+
+main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
+assert "Run full Klippy no-pin smoke test" in main_activity
+assert "requestUsbPermissionsAndStart(fullSmoke = true)" in main_activity
+
+host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
+assert "EXTRA_FULL_SMOKE" in host_service
+assert 'smokePtyPaths.joinToString("|")' in host_service
+assert "probe_full_klippy" in host_service
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "def probe_pipe_open(path):" in hostprobe
@@ -55,6 +65,13 @@ assert "os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)" in hostprobe
 assert "serial.Serial(" not in hostprobe
 assert "serial_reader.connect_pipe(path)" in hostprobe
 assert "serial_reader.connect_uart(path" not in hostprobe
+assert "def probe_full_klippy(pty_paths, c_helper_path, work_dir):" in hostprobe
+assert '"kinematics: none"' in hostprobe
+assert '"max_velocity: 1"' in hostprobe
+assert '"max_accel: 1"' in hostprobe
+assert '"step_pin:"' not in hostprobe
+assert '"heater_pin:"' not in hostprobe
+assert '"fan_pin:"' not in hostprobe
 
 patcher = (root / "scripts/patch-klipper.py").read_text()
 assert "serialport.startswith('/dev/pts/')" in patcher
