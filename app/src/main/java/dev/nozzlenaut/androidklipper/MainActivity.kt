@@ -166,33 +166,23 @@ class MainActivity : Activity() {
             return
         }
 
-        var requested = 0
-        devices.forEachIndexed { index, device ->
-            if (!UsbDeviceScanner.isSupported(device)) return@forEachIndexed
-            if (!usbManager.hasPermission(device)) {
-                val intent = Intent(this, UsbPermissionReceiver::class.java).apply {
-                    action = UsbPermissionReceiver.ACTION_USB_PERMISSION
-                    putExtra(KlipperHostService.EXTRA_FULL_SMOKE, fullSmoke)
-                    putExtra(KlipperHostService.EXTRA_REAL_CONFIG, realConfig)
-                }
-                val pending = PendingIntent.getBroadcast(
-                    this,
-                    1000 + index,
-                    intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-                )
-                usbManager.requestPermission(device, pending)
-                requested++
-            }
-        }
+        val supported = devices.filter { UsbDeviceScanner.isSupported(it) }
+        val next = supported.firstOrNull { !usbManager.hasPermission(it) }
 
-        if (requested == 0) {
+        if (next == null) {
             KlipperHostService.start(this, fullSmoke, realConfig)
         } else {
+            UsbPermissionReceiver.requestNext(
+                this,
+                usbManager,
+                next,
+                fullSmoke,
+                realConfig
+            )
             status.text = when {
-                realConfig -> "Grant USB permission for each printer MCU. The real Voron config test starts after all supported MCUs are granted."
-                fullSmoke -> "Grant USB permission for each printer MCU. The full Klippy smoke test starts after all supported MCUs are granted."
-                else -> "Grant USB permission for each printer MCU. The host test starts after all supported MCUs are granted."
+                realConfig -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the real Voron config test."
+                fullSmoke -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the smoke test."
+                else -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the host test."
             }
         }
     }
