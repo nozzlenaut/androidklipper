@@ -34,3 +34,18 @@ if len(sys.argv) >= 3:
     if serial_needle not in serial_text:
         raise SystemExit("Klipper serialhdl patch point changed; inspect upstream before updating the pin")
     serial_path.write_text(serial_text.replace(serial_needle, serial_replacement, 1))
+
+
+if len(sys.argv) >= 4:
+    mcu_path = Path(sys.argv[3])
+    mcu_text = mcu_path.read_text()
+    mcu_needle = """            if not (self._serialport.startswith("/dev/rpmsg_")
+                    or self._serialport.startswith("/tmp/klipper_host_")):
+"""
+    mcu_replacement = """            if not (self._serialport.startswith("/dev/rpmsg_")
+                    or self._serialport.startswith("/tmp/klipper_host_")
+                    or self._serialport.startswith("/dev/pts/")):
+"""
+    if mcu_needle not in mcu_text:
+        raise SystemExit("Klipper mcu PTY patch point changed; inspect upstream before updating the pin")
+    mcu_path.write_text(mcu_text.replace(mcu_needle, mcu_replacement, 1))
