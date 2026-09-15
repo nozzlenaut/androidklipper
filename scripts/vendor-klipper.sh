@@ -25,6 +25,7 @@ printf '%s\n' "$KLIPPER_COMMIT" > "$PY_VENDOR/KLIPPER_COMMIT"
 python3 "$ROOT/scripts/patch-klipper.py" \
   "$PY_VENDOR/klippy/chelper/__init__.py" \
   "$PY_VENDOR/klippy/serialhdl.py" \
-  "$PY_VENDOR/klippy/mcu.py"
+  "$PY_VENDOR/klippy/mcu.py" \
+  "$PY_VENDOR/klippy/klippy.py"
 
 echo "Vendored Klipper $KLIPPER_COMMIT"
