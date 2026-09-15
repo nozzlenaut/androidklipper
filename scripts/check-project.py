@@ -112,6 +112,7 @@ assert 'self._serialport.startswith("/dev/pts/")' in patcher
 
 vendor = (root / "scripts/vendor-klipper.sh").read_text()
 assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
+assert '"$PY_VENDOR/klippy/klippy.py"' in vendor
 assert 'cp -a "$VENDOR/klippy/extras" "$PY_ROOT/"' in vendor
 assert 'cp -a "$VENDOR/klippy/kinematics" "$PY_ROOT/"' in vendor
 
