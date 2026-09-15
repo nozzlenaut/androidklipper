@@ -69,6 +69,14 @@ jobs:
             -keysize 2048 \
             -validity 10000
 
+      - name: Verify debug signing key
+        run: |
+          keytool -list -v \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            | grep -E 'Owner:|SHA256:'
+
       - name: Vendor pinned Klipper
         run: bash scripts/vendor-klipper.sh
 
