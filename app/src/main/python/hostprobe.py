@@ -8,17 +8,12 @@ def _klippy_path():
     return klippy_dir
 
 
-def probe_serial(path, baud=115200):
-    """Harmlessly prove embedded Python + pySerial can open an Android PTY."""
-    import serial
-    # Android PTYs reject pySerial's TIOCEXCL ioctl with EACCES. The native
-    # bridge already owns the physical USB device, so an extra PTY lock is
-    # unnecessary here.
-    port = serial.Serial(port=None, baudrate=baud, timeout=0, exclusive=False)
-    port.port = path
-    port.open()
-    port.close()
-    return "pySerial OK"
+def probe_pipe_open(path):
+    """Open the Android PTY as a plain byte pipe without serial ioctls."""
+    import os
+    fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    os.close(fd)
+    return "PTY pipe open OK"
 
 
 def probe_c_helper(path):
