@@ -49,10 +49,25 @@ jobs:
       # development-only key, but caching it lets later APKs update in place
       # instead of forcing an uninstall/reinstall every build.
       - name: Restore debug signing key
+        id: debug-signing-cache
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: androidklipper-debug-keystore-v1
+
+      - name: Create debug signing key on first run
+        if: steps.debug-signing-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
 
       - name: Vendor pinned Klipper
         run: bash scripts/vendor-klipper.sh
