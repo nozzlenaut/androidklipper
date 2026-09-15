@@ -160,6 +160,12 @@ class MainActivity : Activity() {
         fullSmoke: Boolean,
         realConfig: Boolean = false
     ) {
+        getSharedPreferences("usb_permission_mode", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KlipperHostService.EXTRA_FULL_SMOKE, fullSmoke)
+            .putBoolean(KlipperHostService.EXTRA_REAL_CONFIG, realConfig)
+            .apply()
+
         val devices = usbManager.deviceList.values.toList()
         if (devices.isEmpty()) {
             status.text = "No USB devices found."
