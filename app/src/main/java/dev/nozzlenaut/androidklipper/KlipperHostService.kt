@@ -87,8 +87,6 @@ class KlipperHostService : Service() {
                 }
                 session.start()
                 sessions += session
-                smokePtyPaths += pty.slavePath
-                stablePtyMap[stableId] = pty.slavePath
 
                 val pipeProbe = hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
                 val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
@@ -97,7 +95,12 @@ class KlipperHostService : Service() {
                         pty.slavePath,
                         helper.absolutePath,
                         115200
-                    ).toString()
+                    ).toString().also {
+                        // Only arm a PTY for full/real Klippy after the MCU has
+                        // actually completed Klipper identify successfully.
+                        smokePtyPaths += pty.slavePath
+                        stablePtyMap[stableId] = pty.slavePath
+                    }
                 } else {
                     "Klipper identify skipped: unknown serial device"
                 }
