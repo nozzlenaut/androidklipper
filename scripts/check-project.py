@@ -57,6 +57,9 @@ permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/u
 assert "supported.all { manager.hasPermission(it) }" in permission_receiver
 assert "KlipperHostService.EXTRA_FULL_SMOKE" in permission_receiver
 assert "KlipperHostService.EXTRA_REAL_CONFIG" in permission_receiver
+assert "fun requestNext(" in permission_receiver
+assert "supported.firstOrNull { !manager.hasPermission(it) }" in permission_receiver
+assert "manager.requestPermission(device, pending)" in permission_receiver
 
 main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
 assert "Run full Klippy no-pin smoke test" in main_activity
@@ -65,6 +68,8 @@ assert "Import NUC config + run real Voron startup test" in main_activity
 assert "realConfig = true" in main_activity
 assert "UsbManager.ACTION_USB_DEVICE_ATTACHED" in main_activity
 assert "override fun onNewIntent" in main_activity
+assert "UsbPermissionReceiver.requestNext" in main_activity
+assert "devices.forEachIndexed" not in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "EXTRA_FULL_SMOKE" in host_service
