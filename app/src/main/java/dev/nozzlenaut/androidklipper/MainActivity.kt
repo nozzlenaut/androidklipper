@@ -46,7 +46,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val safety = TextView(this).apply {
-            text = "Host test is identify-only. Full Klippy smoke intentionally applies a temporary kinematics=none, no-pin MCU config, then exits as soon as Klippy reaches Ready. Power-cycle the printer after the smoke test before loading the real printer config."
+            text = "Host test is identify-only. Full Klippy smoke applies a temporary no-pin config. Real Voron config test imports the active config from the old Moonraker host and configures the actual printer hardware, then exits as soon as Klippy reaches Ready."
             textSize = 14f
             setPadding(0, 16, 0, 8)
         }
@@ -68,6 +68,12 @@ class MainActivity : Activity() {
             text = "Run full Klippy no-pin smoke test"
             setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = true) }
         }
+        val realConfig = Button(this).apply {
+            text = "Import NUC config + run real Voron startup test"
+            setOnClickListener {
+                requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
+            }
+        }
         val copy = Button(this).apply {
             text = "Copy diagnostic report"
             setOnClickListener { copyReport() }
@@ -86,6 +92,7 @@ class MainActivity : Activity() {
         root.addView(scan)
         root.addView(test)
         root.addView(smoke)
+        root.addView(realConfig)
         root.addView(copy)
         root.addView(stop)
         setContentView(ScrollView(this).apply { addView(root) })
@@ -137,7 +144,10 @@ class MainActivity : Activity() {
         Toast.makeText(this, "Diagnostic copied", Toast.LENGTH_SHORT).show()
     }
 
-    private fun requestUsbPermissionsAndStart(fullSmoke: Boolean) {
+    private fun requestUsbPermissionsAndStart(
+        fullSmoke: Boolean,
+        realConfig: Boolean = false
+    ) {
         val devices = usbManager.deviceList.values.toList()
         if (devices.isEmpty()) {
             status.text = "No USB devices found."
@@ -151,6 +161,7 @@ class MainActivity : Activity() {
                 val intent = Intent(this, UsbPermissionReceiver::class.java).apply {
                     action = UsbPermissionReceiver.ACTION_USB_PERMISSION
                     putExtra(KlipperHostService.EXTRA_FULL_SMOKE, fullSmoke)
+                    putExtra(KlipperHostService.EXTRA_REAL_CONFIG, realConfig)
                 }
                 val pending = PendingIntent.getBroadcast(
                     this,
@@ -164,12 +175,12 @@ class MainActivity : Activity() {
         }
 
         if (requested == 0) {
-            KlipperHostService.start(this, fullSmoke)
+            KlipperHostService.start(this, fullSmoke, realConfig)
         } else {
-            status.text = if (fullSmoke) {
-                "Grant USB permission for each printer MCU. The full Klippy smoke test starts after all supported MCUs are granted."
-            } else {
-                "Grant USB permission for each printer MCU. The host test starts after all supported MCUs are granted."
+            status.text = when {
+                realConfig -> "Grant USB permission for each printer MCU. The real Voron config test starts after all supported MCUs are granted."
+                fullSmoke -> "Grant USB permission for each printer MCU. The full Klippy smoke test starts after all supported MCUs are granted."
+                else -> "Grant USB permission for each printer MCU. The host test starts after all supported MCUs are granted."
             }
         }
     }
