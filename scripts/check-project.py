@@ -18,6 +18,13 @@ for rel in required:
 manifest = (root / "app/src/main/AndroidManifest.xml").read_text()
 assert "android.hardware.usb.host" in manifest
 assert "foregroundServiceType=\"connectedDevice\"" in manifest
+assert "android.hardware.usb.action.USB_DEVICE_ATTACHED" in manifest
+assert "@xml/device_filter" in manifest
+assert 'android:launchMode="singleTop"' in manifest
+
+device_filter = (root / "app/src/main/res/xml/device_filter.xml").read_text()
+assert 'vendor-id="7504"' in device_filter
+assert 'product-id="24910"' in device_filter
 
 build = (root / "app/build.gradle.kts").read_text()
 assert 'GITHUB_RUN_NUMBER' in build
@@ -56,6 +63,8 @@ assert "Run full Klippy no-pin smoke test" in main_activity
 assert "requestUsbPermissionsAndStart(fullSmoke = true)" in main_activity
 assert "Import NUC config + run real Voron startup test" in main_activity
 assert "realConfig = true" in main_activity
+assert "UsbManager.ACTION_USB_DEVICE_ATTACHED" in main_activity
+assert "override fun onNewIntent" in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "EXTRA_FULL_SMOKE" in host_service
@@ -81,6 +90,8 @@ assert "3033393834057C77" in hostprobe
 assert "504450610844C31C" in hostprobe
 assert "temperature_sensor NUC" in hostprobe
 assert "K-ShakeTune" in hostprobe
+assert "restart_method" in hostprobe
+assert "Android PTYs are treated as Klipper pipe transports" in hostprobe
 assert "~/printer_data/gcodes" in hostprobe
 assert "~/printer_data/config/variables" in hostprobe
 assert '"kinematics: none"' in hostprobe
