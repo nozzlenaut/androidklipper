@@ -26,6 +26,7 @@ python3 "$ROOT/scripts/patch-klipper.py" \
   "$PY_VENDOR/klippy/chelper/__init__.py" \
   "$PY_VENDOR/klippy/serialhdl.py" \
   "$PY_VENDOR/klippy/mcu.py" \
-  "$PY_VENDOR/klippy/klippy.py"
+  "$PY_VENDOR/klippy/klippy.py" \
+  "$PY_ROOT/extras/statistics.py"
 
 echo "Vendored Klipper $KLIPPER_COMMIT"
