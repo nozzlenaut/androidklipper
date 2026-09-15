@@ -49,3 +49,26 @@ if len(sys.argv) >= 4:
     if mcu_needle not in mcu_text:
         raise SystemExit("Klipper mcu PTY patch point changed; inspect upstream before updating the pin")
     mcu_path.write_text(mcu_text.replace(mcu_needle, mcu_replacement, 1))
+
+
+if len(sys.argv) >= 5:
+    klippy_path = Path(sys.argv[4])
+    klippy_text = klippy_path.read_text()
+    klippy_needle = """        try:
+            self.reactor.run()
+        except:
+            msg = "Unhandled exception during run"
+            logging.exception(msg)
+"""
+    klippy_replacement = """        try:
+            self.reactor.run()
+        except BaseException as e:
+            msg = "Unhandled exception during run: %s: %s" % (
+                type(e).__name__, e)
+            logging.exception(msg)
+"""
+    if klippy_needle not in klippy_text:
+        raise SystemExit(
+            "Klippy run exception patch point changed; inspect upstream before updating the pin")
+    klippy_path.write_text(
+        klippy_text.replace(klippy_needle, klippy_replacement, 1))
