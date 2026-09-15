@@ -36,7 +36,9 @@ def probe_klipper_import():
     import serialhdl  # noqa: F401
     import mcu  # noqa: F401
     import toolhead  # noqa: F401
-    return "Klipper imports OK"
+    import extras.error_mcu  # noqa: F401
+    import kinematics.none  # noqa: F401
+    return "Klipper imports OK (core + extras + kinematics)"
 
 
 def probe_mcu_identify(path, c_helper_path, baud=115200):
