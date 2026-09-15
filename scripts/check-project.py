@@ -59,6 +59,8 @@ assert "KlipperHostService.EXTRA_REAL_CONFIG" in permission_receiver
 assert "fun requestNext(" in permission_receiver
 assert "supported.firstOrNull { !manager.hasPermission(it) }" in permission_receiver
 assert "manager.requestPermission(device, pending)" in permission_receiver
+assert 'getSharedPreferences("usb_permission_mode"' in permission_receiver
+assert "prefs.edit().clear().apply()" in permission_receiver
 
 main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
 assert "Run full Klippy no-pin smoke test" in main_activity
@@ -68,6 +70,7 @@ assert "realConfig = true" in main_activity
 assert "UsbManager.ACTION_USB_DEVICE_ATTACHED" in main_activity
 assert "override fun onNewIntent" in main_activity
 assert "UsbPermissionReceiver.requestNext" in main_activity
+assert 'getSharedPreferences("usb_permission_mode"' in main_activity
 assert "devices.forEachIndexed" not in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
@@ -113,6 +116,7 @@ assert 'self._serialport.startswith("/dev/pts/")' in patcher
 vendor = (root / "scripts/vendor-klipper.sh").read_text()
 assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
 assert '"$PY_VENDOR/klippy/klippy.py"' in vendor
+assert '"$PY_ROOT/extras/statistics.py"' in vendor
 assert 'cp -a "$VENDOR/klippy/extras" "$PY_ROOT/"' in vendor
 assert 'cp -a "$VENDOR/klippy/kinematics" "$PY_ROOT/"' in vendor
 
