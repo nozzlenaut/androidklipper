@@ -62,3 +62,11 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
   - stm32f446xx: `3F001E001450535556323420` (151 commands)
   - rp2040: `504450610844C31C` (139 commands)
   - verified on build 108 after printer power-cycle
+
+- [x] Fire HD 8: full Klippy runtime reaches `Printer is ready` with all three physical printer MCUs through Android USB/PTYS
+  - build 117
+  - test config: `kinematics: none`, no configured pins
+  - stm32f446xx: `3F001E001450535556323420`
+  - rp2040: `3033393834057C77`
+  - rp2040: `504450610844C31C`
+  - dynamic Klipper packages `extras` and `kinematics` verified under Chaquopy
