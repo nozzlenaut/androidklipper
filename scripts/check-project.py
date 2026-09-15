@@ -65,6 +65,8 @@ assert "os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)" in hostprobe
 assert "serial.Serial(" not in hostprobe
 assert "serial_reader.connect_pipe(path)" in hostprobe
 assert "serial_reader.connect_uart(path" not in hostprobe
+assert "import extras.error_mcu" in hostprobe
+assert "import kinematics.none" in hostprobe
 assert "def probe_full_klippy(pty_paths, c_helper_path, work_dir):" in hostprobe
 assert '"kinematics: none"' in hostprobe
 assert '"max_velocity: 1"' in hostprobe
@@ -80,6 +82,8 @@ assert 'self._serialport.startswith("/dev/pts/")' in patcher
 
 vendor = (root / "scripts/vendor-klipper.sh").read_text()
 assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
+assert 'cp -a "$VENDOR/klippy/extras" "$PY_ROOT/"' in vendor
+assert 'cp -a "$VENDOR/klippy/kinematics" "$PY_ROOT/"' in vendor
 
 status_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/LocalStatusServer.kt").read_text()
 assert "fun start(port: Int = 7715)" in status_server
