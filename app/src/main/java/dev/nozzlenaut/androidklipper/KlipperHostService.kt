@@ -34,17 +34,20 @@ class KlipperHostService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val fullSmoke = intent?.getBooleanExtra(EXTRA_FULL_SMOKE, false) ?: false
-        startForeground(
-            NOTIFICATION_ID,
-            notification(if (fullSmoke) "Starting full Klippy smoke test…" else "Starting USB host test…")
-        )
+        val realConfig = intent?.getBooleanExtra(EXTRA_REAL_CONFIG, false) ?: false
+        val startText = when {
+            realConfig -> "Starting real Voron config test…"
+            fullSmoke -> "Starting full Klippy smoke test…"
+            else -> "Starting USB host test…"
+        }
+        startForeground(NOTIFICATION_ID, notification(startText))
         // USB permission callbacks can arrive close together for multi-MCU printers.
         // Serialize rebuilds so two service starts never fight over the same device.
-        hostExecutor.execute { rebuildSessions(fullSmoke) }
+        hostExecutor.execute { rebuildSessions(fullSmoke, realConfig) }
         return START_STICKY
     }
 
-    private fun rebuildSessions(fullSmoke: Boolean) {
+    private fun rebuildSessions(fullSmoke: Boolean, realConfig: Boolean) {
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
 
@@ -53,6 +56,7 @@ class KlipperHostService : Service() {
         val helper = File(applicationInfo.nativeLibraryDir, "libklipper_c_helper.so")
         val statusLines = mutableListOf<String>()
         val smokePtyPaths = mutableListOf<String>()
+        val stablePtyMap = linkedMapOf<String, String>()
 
         try {
             statusLines += hostprobe.callAttr("probe_klipper_import").toString()
@@ -84,6 +88,7 @@ class KlipperHostService : Service() {
                 session.start()
                 sessions += session
                 smokePtyPaths += pty.slavePath
+                stablePtyMap[stableId] = pty.slavePath
 
                 val pipeProbe = hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
                 val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
@@ -109,10 +114,34 @@ class KlipperHostService : Service() {
             }
         }
 
-        if (fullSmoke) {
-            val allLikelyKlipper = supported.isNotEmpty() &&
-                supported.all { (device, _) -> UsbDeviceScanner.isLikelyKlipper(device) }
-            if (smokePtyPaths.size != supported.size || !allLikelyKlipper) {
+        val allLikelyKlipper = supported.isNotEmpty() &&
+            supported.all { (device, _) -> UsbDeviceScanner.isLikelyKlipper(device) }
+        val allIdentified = smokePtyPaths.size == supported.size && allLikelyKlipper
+
+        if (realConfig) {
+            if (!allIdentified || stablePtyMap.size != supported.size) {
+                statusLines += "Real config test SKIPPED: every supported USB device must identify as a Klipper MCU first."
+            } else {
+                publishStatus(
+                    "AndroidKlipper real Voron config test\n\n" +
+                        statusLines.joinToString("\n\n") +
+                        "\n\nImporting active config from Moonraker and starting real Klippy…"
+                )
+                try {
+                    val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
+                    statusLines += hostprobe.callAttr(
+                        "probe_real_config_from_moonraker",
+                        CONFIG_SOURCE_URL,
+                        stableMapping,
+                        helper.absolutePath,
+                        filesDir.absolutePath
+                    ).toString()
+                } catch (t: Throwable) {
+                    statusLines += "Real Voron config ERROR ${t.javaClass.simpleName}: ${t.message}"
+                }
+            }
+        } else if (fullSmoke) {
+            if (!allIdentified) {
                 statusLines += "Full Klippy smoke SKIPPED: every supported USB device must identify as a Klipper MCU first."
             } else {
                 publishStatus(
@@ -136,7 +165,11 @@ class KlipperHostService : Service() {
         val summary = if (statusLines.isEmpty()) {
             "No supported USB serial devices with permission."
         } else {
-            val title = if (fullSmoke) "AndroidKlipper full smoke test" else "AndroidKlipper host test"
+            val title = when {
+                realConfig -> "AndroidKlipper real Voron config test"
+                fullSmoke -> "AndroidKlipper full smoke test"
+                else -> "AndroidKlipper host test"
+            }
             title + "\n\n" + statusLines.joinToString("\n\n")
         }
         publishStatus(summary)
@@ -190,12 +223,19 @@ class KlipperHostService : Service() {
         const val ACTION_STATUS = "dev.nozzlenaut.androidklipper.STATUS"
         const val EXTRA_STATUS = "status"
         const val EXTRA_FULL_SMOKE = "full_smoke"
+        const val EXTRA_REAL_CONFIG = "real_config"
+        private const val CONFIG_SOURCE_URL = "http://192.168.1.83:7125"
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
 
-        fun start(context: Context, fullSmoke: Boolean = false) {
+        fun start(
+            context: Context,
+            fullSmoke: Boolean = false,
+            realConfig: Boolean = false
+        ) {
             val intent = Intent(context, KlipperHostService::class.java).apply {
                 putExtra(EXTRA_FULL_SMOKE, fullSmoke)
+                putExtra(EXTRA_REAL_CONFIG, realConfig)
             }
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
             else context.startService(intent)
