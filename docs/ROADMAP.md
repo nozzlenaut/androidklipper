@@ -54,3 +54,11 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
 - [ ] universal phone/tablet mount
 - [ ] optional hardware kit
 - [ ] donation links / sponsors
+
+
+## Verified hardware milestone
+- [x] Fire HD 8: all three printer MCUs complete Klipper identify through Android USB -> native bridge -> raw PTY -> embedded Klipper
+  - rp2040: `3033393834057C77` (139 commands)
+  - stm32f446xx: `3F001E001450535556323420` (151 commands)
+  - rp2040: `504450610844C31C` (139 commands)
+  - verified on build 108 after printer power-cycle
