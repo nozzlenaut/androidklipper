@@ -100,7 +100,19 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 44)
         }
-        if (HostStatusStore.load(this) == null) scanUsb()
+        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED ||
+            HostStatusStore.load(this) == null
+        ) {
+            scanUsb()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
+            scanUsb()
+        }
     }
 
     override fun onStart() {
