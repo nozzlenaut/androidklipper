@@ -32,4 +32,9 @@ done
 unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
 unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
 
+APKSIGNER="${ANDROID_SDK_ROOT:-}/build-tools/35.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-256 digest|Signer #1 certificate DN'
+fi
+
 echo "APK packaging invariants: PASS"
