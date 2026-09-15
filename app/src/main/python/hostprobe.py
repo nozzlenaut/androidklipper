@@ -227,6 +227,15 @@ def _sanitize_android_config(name, text, stable_to_pty, work_dir):
         text,
     )
 
+    # Android PTYs are treated as Klipper pipe transports, not UARTs.
+    # Upstream only consumes restart_method when a baud-backed UART is used,
+    # so leaving it in a rewritten PTY MCU section makes config validation fail.
+    text = re.sub(
+        r"(?im)^\s*restart_method\s*:\s*\S+\s*$\n?",
+        "",
+        text,
+    )
+
     gcodes_dir = os.path.join(work_dir, "gcodes")
     variables_path = os.path.join(work_dir, "config", "variables.cfg")
     text = re.sub(
