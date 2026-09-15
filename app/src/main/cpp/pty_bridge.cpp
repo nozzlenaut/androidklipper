@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <poll.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -60,10 +61,23 @@ Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeRead(
     const int pr = poll(&pfd, 1, timeoutMs);
     if (pr <= 0) return pr;
 
+    // devpts reports HUP while no process has the slave side open. Without
+    // handling that explicitly, poll() returns immediately and the Java reader
+    // can hot-loop until Klippy attaches.
+    if ((pfd.revents & (POLLHUP | POLLERR | POLLNVAL))
+            && !(pfd.revents & POLLIN)) {
+        usleep(10 * 1000);
+        return 0;
+    }
+
     const jsize cap = env->GetArrayLength(buffer);
     jbyte* bytes = env->GetByteArrayElements(buffer, nullptr);
     const ssize_t n = read(fd, bytes, static_cast<size_t>(cap));
     env->ReleaseByteArrayElements(buffer, bytes, n > 0 ? 0 : JNI_ABORT);
+    if (n < 0 && errno == EIO) {
+        usleep(10 * 1000);
+        return 0;
+    }
     return static_cast<jint>(n);
 }
 
