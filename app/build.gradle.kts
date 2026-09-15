@@ -11,6 +11,15 @@ android {
     compileSdk = 35
     ndkVersion = "27.2.12479018"
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "dev.nozzlenaut.androidklipper"
         minSdk = 24
@@ -33,6 +42,12 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
