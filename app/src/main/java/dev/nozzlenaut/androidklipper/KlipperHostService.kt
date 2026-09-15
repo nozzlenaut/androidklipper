@@ -79,7 +79,7 @@ class KlipperHostService : Service() {
                 session.start()
                 sessions += session
 
-                val serialProbe = hostprobe.callAttr("probe_serial", pty.slavePath, 115200).toString()
+                val pipeProbe = hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
                 val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
                     hostprobe.callAttr(
                         "probe_mcu_identify",
@@ -95,7 +95,7 @@ class KlipperHostService : Service() {
                     append("MCU ${index + 1}: ${device.productName ?: driver.javaClass.simpleName}\n")
                     append("  id: $stableId\n")
                     append("  PTY: ${pty.slavePath}\n")
-                    append("  Python: $serialProbe\n")
+                    append("  Pipe: $pipeProbe\n")
                     append("  Protocol: $identifyProbe")
                 }
             } catch (t: Throwable) {
