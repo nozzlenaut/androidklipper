@@ -46,7 +46,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val safety = TextView(this).apply {
-            text = "Safe diagnostic build: the Klipper protocol test only identifies MCUs. It does not configure motion, heaters, fans, or GPIO."
+            text = "Host test is identify-only. Full Klippy smoke intentionally applies a temporary kinematics=none, no-pin MCU config, then exits as soon as Klippy reaches Ready. Power-cycle the printer after the smoke test before loading the real printer config."
             textSize = 14f
             setPadding(0, 16, 0, 8)
         }
@@ -62,7 +62,11 @@ class MainActivity : Activity() {
         }
         val test = Button(this).apply {
             text = "Grant USB access and start host test"
-            setOnClickListener { requestUsbPermissionsAndStart() }
+            setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = false) }
+        }
+        val smoke = Button(this).apply {
+            text = "Run full Klippy no-pin smoke test"
+            setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = true) }
         }
         val copy = Button(this).apply {
             text = "Copy diagnostic report"
@@ -81,6 +85,7 @@ class MainActivity : Activity() {
         root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(scan)
         root.addView(test)
+        root.addView(smoke)
         root.addView(copy)
         root.addView(stop)
         setContentView(ScrollView(this).apply { addView(root) })
@@ -132,7 +137,7 @@ class MainActivity : Activity() {
         Toast.makeText(this, "Diagnostic copied", Toast.LENGTH_SHORT).show()
     }
 
-    private fun requestUsbPermissionsAndStart() {
+    private fun requestUsbPermissionsAndStart(fullSmoke: Boolean) {
         val devices = usbManager.deviceList.values.toList()
         if (devices.isEmpty()) {
             status.text = "No USB devices found."
@@ -145,6 +150,7 @@ class MainActivity : Activity() {
             if (!usbManager.hasPermission(device)) {
                 val intent = Intent(this, UsbPermissionReceiver::class.java).apply {
                     action = UsbPermissionReceiver.ACTION_USB_PERMISSION
+                    putExtra(KlipperHostService.EXTRA_FULL_SMOKE, fullSmoke)
                 }
                 val pending = PendingIntent.getBroadcast(
                     this,
@@ -158,9 +164,13 @@ class MainActivity : Activity() {
         }
 
         if (requested == 0) {
-            KlipperHostService.start(this)
+            KlipperHostService.start(this, fullSmoke)
         } else {
-            status.text = "Grant USB permission for each printer MCU. The host test starts after all supported MCUs are granted."
+            status.text = if (fullSmoke) {
+                "Grant USB permission for each printer MCU. The full Klippy smoke test starts after all supported MCUs are granted."
+            } else {
+                "Grant USB permission for each printer MCU. The host test starts after all supported MCUs are granted."
+            }
         }
     }
 }
