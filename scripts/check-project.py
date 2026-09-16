@@ -186,6 +186,12 @@ assert '"hostname": "$hostname"' in mainsail_server
 assert '"port": 7125' in mainsail_server
 assert (root / "app/src/main/assets/mainsail/index.html").exists()
 assert (root / "app/src/main/assets/mainsail/sw.js").exists()
+assert "prepareGcodeStorage" in host_service
+assert "Environment.isExternalStorageRemovable" in host_service
+assert "Os.symlink" in host_service
+mainsail_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainsailActivity.kt").read_text()
+assert 'loadUrl("http://127.0.0.1:8080/")' in mainsail_activity
+assert "setLayerType(View.LAYER_TYPE_HARDWARE" in mainsail_activity
 
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch

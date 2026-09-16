@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Environment
+import android.system.Os
 import android.os.IBinder
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -17,6 +19,7 @@ import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 
@@ -69,10 +72,13 @@ class KlipperHostService : Service() {
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
 
+        val storageSummary = prepareGcodeStorage()
+
         if (!Python.isStarted()) Python.start(AndroidPlatform(this))
         val hostprobe = Python.getInstance().getModule("hostprobe")
         val helper = File(applicationInfo.nativeLibraryDir, "libklipper_c_helper.so")
         val statusLines = mutableListOf<String>()
+        statusLines += storageSummary
         val smokePtyPaths = mutableListOf<String>()
         val stablePtyMap = linkedMapOf<String, String>()
 
@@ -268,6 +274,64 @@ class KlipperHostService : Service() {
             title + "\n\n" + statusLines.joinToString("\n\n")
         }
         publishStatus(summary)
+    }
+
+    private fun prepareGcodeStorage(): String {
+        val dataRoot = File(filesDir, "printer_data")
+        dataRoot.mkdirs()
+        val internalGcodes = File(dataRoot, "gcodes")
+
+        val removableRoot = getExternalFilesDirs(null)
+            .filterNotNull()
+            .firstOrNull { dir ->
+                Environment.isExternalStorageRemovable(dir) &&
+                    Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
+            }
+
+        if (removableRoot == null) {
+            if (!internalGcodes.exists()) internalGcodes.mkdirs()
+            return "G-code storage: internal (" + internalGcodes.absolutePath + ")"
+        }
+
+        val sdGcodes = File(removableRoot, "gcodes")
+        if (!sdGcodes.exists() && !sdGcodes.mkdirs()) {
+            if (!internalGcodes.exists()) internalGcodes.mkdirs()
+            return "G-code storage WARNING: SD folder unavailable; using internal storage"
+        }
+
+        val linkPath = internalGcodes.toPath()
+        if (Files.isSymbolicLink(linkPath)) {
+            val target = runCatching { Files.readSymbolicLink(linkPath).toString() }.getOrNull()
+            if (target == sdGcodes.absolutePath) {
+                return "G-code storage: removable SD (" + sdGcodes.absolutePath + ")"
+            }
+            runCatching { Files.delete(linkPath) }
+        } else if (internalGcodes.exists()) {
+            val existing = internalGcodes.listFiles().orEmpty()
+            if (existing.isNotEmpty()) {
+                existing.forEach { source ->
+                    val dest = File(sdGcodes, source.name)
+                    runCatching {
+                        if (source.isDirectory) source.copyRecursively(dest, overwrite = true)
+                        else source.copyTo(dest, overwrite = true)
+                    }
+                }
+            }
+            runCatching { internalGcodes.deleteRecursively() }
+        }
+
+        return try {
+            internalGcodes.parentFile?.mkdirs()
+            Os.symlink(sdGcodes.absolutePath, internalGcodes.absolutePath)
+            val probe = File(internalGcodes, ".androidklipper-storage-probe")
+            probe.writeText("ok")
+            probe.delete()
+            "G-code storage: removable SD (" + sdGcodes.absolutePath + ")"
+        } catch (t: Throwable) {
+            runCatching { internalGcodes.delete() }
+            internalGcodes.mkdirs()
+            "G-code storage WARNING: SD link failed (" + t.javaClass.simpleName + ": " + t.message + "); using internal storage"
+        }
     }
 
     private fun publishStatus(text: String) {

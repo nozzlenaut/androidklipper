@@ -74,6 +74,12 @@ class MainActivity : Activity() {
                 requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
             }
         }
+        val kiosk = Button(this).apply {
+            text = "Open Mainsail kiosk"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, MainsailActivity::class.java))
+            }
+        }
         val copy = Button(this).apply {
             text = "Copy diagnostic report"
             setOnClickListener { copyReport() }
@@ -93,6 +99,7 @@ class MainActivity : Activity() {
         root.addView(test)
         root.addView(smoke)
         root.addView(realConfig)
+        root.addView(kiosk)
         root.addView(copy)
         root.addView(stop)
         setContentView(ScrollView(this).apply { addView(root) })
