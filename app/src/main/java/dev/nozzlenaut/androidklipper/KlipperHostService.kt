@@ -94,16 +94,25 @@ class KlipperHostService : Service() {
             try {
                 val connection = usbManager.openDevice(device)
                     ?: error("UsbManager.openDevice returned null")
-                // Prefer UsbDevice's permission-aware serial number. Fire OS can
-                // intermittently return null from UsbDeviceConnection.serial after a
-                // CDC device has been reopened even though the device descriptor still
-                // exposes the stable Klipper MCU serial.
+                // Fire OS can intermittently stop exposing one MCU serial after
+                // the CDC device has been reopened. Cache every successful stable ID
+                // by the current USB device path so subsequent opens in the same USB
+                // enumeration keep the real Klipper serial instead of degrading to a
+                // VID:PID:path fallback.
+                val stableIdPrefs = getSharedPreferences("usb_stable_ids", Context.MODE_PRIVATE)
+                val cacheKey = device.deviceName
                 val serial = runCatching { device.serialNumber }.getOrNull()
                     ?.takeIf { it.isNotBlank() }
                     ?: runCatching { connection.serial }.getOrNull()
                         ?.takeIf { it.isNotBlank() }
-                val stableId = serial
-                    ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
+                val stableId = if (serial != null) {
+                    stableIdPrefs.edit().putString(cacheKey, serial).apply()
+                    serial
+                } else {
+                    stableIdPrefs.getString(cacheKey, null)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
+                }
                 val pty = PtyBridge.create()
                 val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
                     publishStatus("USB bridge error for $stableId: ${error.message}")
