@@ -3,7 +3,9 @@
 Runs the pinned upstream Moonraker package against persistent_host's normal
 Klipper webhooks Unix socket.  The first Android milestone is loopback-only.
 """
+import ipaddress
 import os
+import socket
 import sys
 import traceback
 
@@ -33,15 +35,48 @@ def _paths(work_dir):
     }
 
 
+def _lan_access():
+    """Return the current Wi-Fi/LAN IP and a conservative local /24."""
+    ip = "127.0.0.1"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # UDP connect selects the active route without sending application data.
+        sock.connect(("8.8.8.8", 80))
+        candidate = sock.getsockname()[0]
+        if ipaddress.ip_address(candidate).is_private:
+            ip = candidate
+    except OSError:
+        pass
+    finally:
+        sock.close()
+
+    if ip == "127.0.0.1":
+        return ip, "127.0.0.1/32"
+    return ip, str(ipaddress.ip_network(ip + "/24", strict=False))
+
+
 def prepare_config(work_dir):
     p = _paths(work_dir)
     for key in ("config_dir", "gcodes_dir", "logs_dir", "database_dir", "comms_dir"):
         os.makedirs(p[key], exist_ok=True)
 
+    lan_ip, trusted_subnet = _lan_access()
+    p["lan_ip"] = lan_ip
+    p["trusted_subnet"] = trusted_subnet
+
     config = """[server]
-host: 127.0.0.1
+host: 0.0.0.0
 port: 7125
 klippy_uds_address: {klippy_socket}
+
+[authorization]
+trusted_clients:
+  127.0.0.1
+  {trusted_subnet}
+cors_domains:
+  http://{lan_ip}:*
+  http://my.mainsail.xyz
+  https://my.mainsail.xyz
 
 [machine]
 provider: none
@@ -84,7 +119,7 @@ def run(work_dir):
         "-l", os.path.join(p["logs_dir"], "moonraker.log"),
     ]
     old_argv = sys.argv
-    _set_status("starting: http://127.0.0.1:7125")
+    _set_status("starting: http://%s:7125" % p["lan_ip"])
     try:
         sys.argv = argv
         try:
