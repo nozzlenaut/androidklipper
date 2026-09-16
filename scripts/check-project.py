@@ -170,8 +170,10 @@ assert "Moonraker READY: http://127.0.0.1:7125" in host_service
 assert "printer_data/comms/klippy.sock" in host_service
 
 assert 'install("tornado==6.5.2")' in build
-assert 'install("streaming-form-data==1.19.1")' in build
 assert 'install("distro==1.9.0")' in build
 assert 'install("inotify-simple==2.0.1")' in build
 
 print("project invariants: PASS")
+
+assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch
+assert "File uploads disabled: streaming-form-data is unavailable" in moon_patch
