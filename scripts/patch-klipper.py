@@ -89,7 +89,7 @@ if len(sys.argv) >= 6:
             except Exception:
                 self.last_load_avg = 0.
 """
-    for stats_arg in sys.argv[5:]:
+    for stats_arg in sys.argv[5:7]:
         stats_path = Path(stats_arg)
         stats_text = stats_path.read_text()
         if stats_needle not in stats_text:
