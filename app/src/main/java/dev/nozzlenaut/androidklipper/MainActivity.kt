@@ -25,11 +25,18 @@ import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var autoStartButton: Button
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
+    private val automationPrefs by lazy {
+        getSharedPreferences(KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE)
+    }
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.getStringExtra(KlipperHostService.EXTRA_STATUS)?.let { status.text = it }
+            intent?.getStringExtra(KlipperHostService.EXTRA_STATUS)?.let { report ->
+                status.text = report
+                maybeOpenAutoKiosk(report)
+            }
         }
     }
 
@@ -74,6 +81,25 @@ class MainActivity : Activity() {
                 requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
             }
         }
+        autoStartButton = Button(this).apply {
+            setOnClickListener {
+                val enabled = !automationPrefs.getBoolean(
+                    KlipperHostService.KEY_AUTO_START_USB, false
+                )
+                automationPrefs.edit()
+                    .putBoolean(KlipperHostService.KEY_AUTO_START_USB, enabled)
+                    .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
+                    .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
+                    .apply()
+                updateAutoStartButton()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (enabled) "USB auto-start enabled" else "USB auto-start disabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        updateAutoStartButton()
         val kiosk = Button(this).apply {
             text = "Open Mainsail kiosk"
             setOnClickListener {
@@ -99,6 +125,7 @@ class MainActivity : Activity() {
         root.addView(test)
         root.addView(smoke)
         root.addView(realConfig)
+        root.addView(autoStartButton)
         root.addView(kiosk)
         root.addView(copy)
         root.addView(stop)
@@ -107,9 +134,9 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 44)
         }
-        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED ||
-            HostStatusStore.load(this) == null
-        ) {
+        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
+            handleUsbAttach()
+        } else if (HostStatusStore.load(this) == null) {
             scanUsb()
         }
     }
@@ -118,7 +145,7 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
-            scanUsb()
+            handleUsbAttach()
         }
     }
 
@@ -137,6 +164,59 @@ class MainActivity : Activity() {
     override fun onStop() {
         unregisterReceiver(statusReceiver)
         super.onStop()
+    }
+
+    private fun updateAutoStartButton() {
+        val enabled = automationPrefs.getBoolean(
+            KlipperHostService.KEY_AUTO_START_USB, false
+        )
+        autoStartButton.text =
+            "Auto-start real host + Mainsail on printer USB: " +
+                if (enabled) "ON" else "OFF"
+    }
+
+    private fun handleUsbAttach() {
+        if (!automationPrefs.getBoolean(KlipperHostService.KEY_AUTO_START_USB, false)) {
+            scanUsb()
+            return
+        }
+
+        val supported = usbManager.deviceList.values
+            .filter { UsbDeviceScanner.isSupported(it) }
+        val klipperCount = supported.count { UsbDeviceScanner.isLikelyKlipper(it) }
+        if (klipperCount < 3) {
+            scanUsb()
+            status.append(
+                "\n\nUSB auto-start armed: waiting for all 3 Klipper MCUs " +
+                    "($klipperCount/3 detected)."
+            )
+            return
+        }
+
+        if (automationPrefs.getBoolean(
+                KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false
+            )
+        ) return
+
+        automationPrefs.edit()
+            .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, true)
+            .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, true)
+            .apply()
+        status.text = "USB auto-start: printer detected; starting real host..."
+        requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
+    }
+
+    private fun maybeOpenAutoKiosk(report: String) {
+        if (!report.contains("Moonraker READY:")) return
+        if (!automationPrefs.getBoolean(
+                KlipperHostService.KEY_AUTO_KIOSK_PENDING, false
+            )
+        ) return
+        automationPrefs.edit()
+            .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
+            .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
+            .apply()
+        startActivity(Intent(this, MainsailActivity::class.java))
     }
 
     private fun scanUsb() {
@@ -184,6 +264,14 @@ class MainActivity : Activity() {
 
         if (next == null) {
             KlipperHostService.start(this, fullSmoke, realConfig)
+            if (realConfig && automationPrefs.getBoolean(
+                    KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false
+                )
+            ) {
+                automationPrefs.edit()
+                    .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
+                    .apply()
+            }
         } else {
             UsbPermissionReceiver.requestNext(
                 this,
