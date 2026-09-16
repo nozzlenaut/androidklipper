@@ -391,6 +391,10 @@ class KlipperHostService : Service() {
         const val EXTRA_STATUS = "status"
         const val EXTRA_FULL_SMOKE = "full_smoke"
         const val EXTRA_REAL_CONFIG = "real_config"
+        const val PREF_AUTOMATION = "automation"
+        const val KEY_AUTO_START_USB = "auto_start_usb"
+        const val KEY_AUTO_START_IN_PROGRESS = "auto_start_in_progress"
+        const val KEY_AUTO_KIOSK_PENDING = "auto_kiosk_pending"
         private const val CONFIG_SOURCE_URL = "http://192.168.1.83:7125"
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
