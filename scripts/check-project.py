@@ -179,6 +179,13 @@ assert "printer_data/comms/klippy.sock" in host_service
 assert 'install("tornado==6.5.2")' in build
 assert 'install("distro==1.9.0")' in build
 assert 'install("inotify-simple==2.0.1")' in build
+assert 'implementation("org.nanohttpd:nanohttpd:2.3.1")' in build
+mainsail_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainsailServer.kt").read_text()
+assert 'port: Int = 8080' in mainsail_server
+assert '"hostname": "$hostname"' in mainsail_server
+assert '"port": 7125' in mainsail_server
+assert (root / "app/src/main/assets/mainsail/index.html").exists()
+assert (root / "app/src/main/assets/mainsail/sw.js").exists()
 
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch

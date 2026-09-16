@@ -33,11 +33,13 @@ class KlipperHostService : Service() {
         Thread(task, "androidklipper-moonraker").apply { isDaemon = true }
     }
     private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
+    private val mainsailServer by lazy { MainsailServer(this) }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         runCatching { statusServer.start() }
+        runCatching { mainsailServer.startServer() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -314,6 +316,7 @@ class KlipperHostService : Service() {
         moonrakerExecutor.shutdownNow()
         klippyExecutor.shutdownNow()
         statusServer.close()
+        runCatching { mainsailServer.stop() }
         super.onDestroy()
     }
 
