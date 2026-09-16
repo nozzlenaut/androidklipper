@@ -4,6 +4,7 @@ import sys
 
 server_path = Path(sys.argv[1])
 application_path = Path(sys.argv[2])
+machine_path = Path(sys.argv[3])
 text = server_path.read_text()
 
 components_old = """CORE_COMPONENTS = [
@@ -179,3 +180,40 @@ application_text = application_text.replace(
     upload_register_old, upload_register_new, 1
 )
 application_path.write_text(application_text)
+
+
+machine_text = machine_path.read_text()
+system_path_constants = """SD_CID_PATH = "/sys/block/mmcblk0/device/cid"
+SD_CSD_PATH = "/sys/block/mmcblk0/device/csd"
+"""
+system_path_safe = """SD_CID_PATH = "/sys/block/mmcblk0/device/cid"
+SD_CSD_PATH = "/sys/block/mmcblk0/device/csd"
+
+# Android SELinux can expose a proc/sysfs path in the filesystem while denying
+# stat access to the app. pathlib.Path.exists() may therefore raise
+# PermissionError instead of returning False. Machine metadata is diagnostic,
+# so inaccessible kernel paths should be treated as absent.
+def _android_safe_exists(path: pathlib.Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+"""
+if system_path_constants not in machine_text:
+    raise SystemExit("Moonraker machine system-path patch point changed")
+machine_text = machine_text.replace(
+    system_path_constants, system_path_safe, 1
+)
+
+for old, new in [
+    ("if not cid_file.exists():", "if not _android_safe_exists(cid_file):"),
+    ("if cpu_file.exists():", "if _android_safe_exists(cpu_file):"),
+    ("if mem_file.exists():", "if _android_safe_exists(mem_file):"),
+    ("if cgroup_file.exists():", "if _android_safe_exists(cgroup_file):"),
+    ("if sched_file.exists():", "if _android_safe_exists(sched_file):"),
+]:
+    if old not in machine_text:
+        raise SystemExit("Moonraker machine exists patch point changed: " + old)
+    machine_text = machine_text.replace(old, new, 1)
+
+machine_path.write_text(machine_text)
