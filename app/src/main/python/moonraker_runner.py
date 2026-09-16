@@ -102,7 +102,14 @@ def run(work_dir):
                     tail = "Unable to read Moonraker log: %s: %s" % (
                         type(log_exc).__name__, log_exc
                     )
+                direct_error = ""
+                try:
+                    direct_error = server.android_get_last_error().strip()
+                except Exception:
+                    pass
                 detail = "Moonraker exited %s" % code
+                if direct_error:
+                    detail += "\n\n--- direct Moonraker traceback ---\n" + direct_error
                 if tail:
                     detail += "\n\n--- moonraker.log tail ---\n" + tail
                 _set_status("error: " + detail)
