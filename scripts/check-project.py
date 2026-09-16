@@ -69,7 +69,7 @@ assert "prefs.edit().clear().apply()" in permission_receiver
 main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
 assert "Run full Klippy no-pin smoke test" in main_activity
 assert "requestUsbPermissionsAndStart(fullSmoke = true)" in main_activity
-assert "Import NUC config + run real Voron startup test" in main_activity
+assert "Import NUC config + start Klipper/Moonraker" in main_activity
 assert "realConfig = true" in main_activity
 assert "UsbManager.ACTION_USB_DEVICE_ATTACHED" in main_activity
 assert "override fun onNewIntent" in main_activity
