@@ -8,6 +8,7 @@
 
     <application
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:label="AndroidKlipper"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
