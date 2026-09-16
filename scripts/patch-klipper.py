@@ -98,3 +98,25 @@ if len(sys.argv) >= 6:
                 % stats_path)
         stats_path.write_text(
             stats_text.replace(stats_needle, stats_replacement, 1))
+
+
+if len(sys.argv) >= 8:
+    gcode_path = Path(sys.argv[7])
+    gcode_text = gcode_path.read_text()
+    gcode_needle = """def add_early_printer_objects(printer):
+    printer.add_object('gcode', GCodeDispatch(printer))
+    printer.add_object('gcode_io', GCodeIO(printer))
+"""
+    gcode_replacement = """def add_early_printer_objects(printer):
+    printer.add_object('gcode', GCodeDispatch(printer))
+    # Moonraker communicates through Klipper's webhooks API socket. Android
+    # does not need Klipper's legacy pseudo-TTY G-code transport, so allow
+    # hosts to omit gcode_fd entirely instead of manufacturing a dummy TTY.
+    if printer.get_start_args().get('gcode_fd') is not None:
+        printer.add_object('gcode_io', GCodeIO(printer))
+"""
+    if gcode_needle not in gcode_text:
+        raise SystemExit(
+            "Klippy gcode_io patch point changed; inspect upstream before updating the pin")
+    gcode_path.write_text(
+        gcode_text.replace(gcode_needle, gcode_replacement, 1))
