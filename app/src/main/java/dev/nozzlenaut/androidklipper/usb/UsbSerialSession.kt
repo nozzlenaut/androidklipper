@@ -27,12 +27,29 @@ class UsbSerialSession(
                 ?: throw IOException("USB serial device has no ports")
             port = serialPort
             serialPort.open(connection)
-            serialPort.setParameters(
-                250000,
-                8,
-                UsbSerialPort.STOPBITS_1,
-                UsbSerialPort.PARITY_NONE
-            )
+
+            try {
+                serialPort.setParameters(
+                    250000,
+                    8,
+                    UsbSerialPort.STOPBITS_1,
+                    UsbSerialPort.PARITY_NONE
+                )
+            } catch (t: Throwable) {
+                // Klipper's native USB CDC transport does not actually use the
+                // virtual UART baud rate. Fire OS can reject the CDC
+                // SET_LINE_CODING request after a previous session has closed,
+                // even though the bulk endpoints are healthy and reusable.
+                //
+                // Ignore only that narrow failure for Klipper's USB VID:PID.
+                // Any other device or setup error remains fatal.
+                val device = driver.device
+                val isKlipperNativeUsb =
+                    device.vendorId == 0x1d50 && device.productId == 0x614e
+                val isLineCodingFailure =
+                    t is IOException && t.message?.contains("controlTransfer failed") == true
+                if (!isKlipperNativeUsb || !isLineCodingFailure) throw t
+            }
 
             // Do not assert DTR/RTS. Some printer controllers tie control-line
             // changes to reset/boot circuitry, so touching them can cause
