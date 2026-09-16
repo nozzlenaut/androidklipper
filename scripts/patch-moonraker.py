@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 
 server_path = Path(sys.argv[1])
+application_path = Path(sys.argv[2])
 text = server_path.read_text()
 
 components_old = """CORE_COMPONENTS = [
@@ -98,3 +99,38 @@ text = text.replace(
 )
 
 server_path.write_text(text)
+
+
+application_text = application_path.read_text()
+upload_import_old = """from streaming_form_data import StreamingFormDataParser, ParseFailedException
+from streaming_form_data.targets import FileTarget, ValueTarget, SHA256Target
+"""
+upload_import_new = """try:
+    from streaming_form_data import StreamingFormDataParser, ParseFailedException
+    from streaming_form_data.targets import FileTarget, ValueTarget, SHA256Target
+    STREAMING_FORM_DATA_AVAILABLE = True
+except ImportError:
+    STREAMING_FORM_DATA_AVAILABLE = False
+"""
+if upload_import_old not in application_text:
+    raise SystemExit("Moonraker upload dependency patch point changed")
+application_text = application_text.replace(
+    upload_import_old, upload_import_new, 1
+)
+
+upload_register_old = """        self.register_upload_handler("/server/files/upload")
+"""
+upload_register_new = """        if STREAMING_FORM_DATA_AVAILABLE:
+            self.register_upload_handler("/server/files/upload")
+        else:
+            self.server.add_warning(
+                "File uploads disabled: streaming-form-data is unavailable "
+                "in the embedded Android runtime"
+            )
+"""
+if upload_register_old not in application_text:
+    raise SystemExit("Moonraker upload registration patch point changed")
+application_text = application_text.replace(
+    upload_register_old, upload_register_new, 1
+)
+application_path.write_text(application_text)
