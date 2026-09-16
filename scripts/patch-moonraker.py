@@ -5,6 +5,7 @@ import sys
 server_path = Path(sys.argv[1])
 application_path = Path(sys.argv[2])
 machine_path = Path(sys.argv[3])
+proc_stats_path = Path(sys.argv[4])
 text = server_path.read_text()
 
 components_old = """CORE_COMPONENTS = [
@@ -217,3 +218,52 @@ for old, new in [
     machine_text = machine_text.replace(old, new, 1)
 
 machine_path.write_text(machine_text)
+
+
+proc_stats_text = proc_stats_path.read_text()
+thermal_old = """    def _get_cpu_thermal_file(self) -> str:
+        if os.path.isdir(HWMON_ROOT_PATH):
+            for hwmon in os.scandir(HWMON_ROOT_PATH):
+                if not hwmon.is_dir():
+                    continue
+                hwmon_name = pathlib.Path(hwmon.path + "/name")
+                try:
+                    name = hwmon_name.read_text().strip()
+                    if name in HWMON_PLATFORMS:
+                        pf = HWMON_PLATFORMS[name]
+                        logging.info(f"Monitoring temperature for {pf} CPU")
+                        return hwmon.path + "/temp1_input"
+                except Exception:
+                    pass
+
+        logging.info("Monitoring temperature using default thermal zone")
+        return TEMPERATURE_PATH
+"""
+thermal_new = """    def _get_cpu_thermal_file(self) -> str:
+        # Android may allow stat() on /sys/class/hwmon while SELinux denies
+        # directory enumeration. CPU temperature is optional telemetry, so a
+        # blocked hwmon directory must not prevent Moonraker from starting.
+        try:
+            if os.path.isdir(HWMON_ROOT_PATH):
+                for hwmon in os.scandir(HWMON_ROOT_PATH):
+                    if not hwmon.is_dir():
+                        continue
+                    hwmon_name = pathlib.Path(hwmon.path + "/name")
+                    try:
+                        name = hwmon_name.read_text().strip()
+                        if name in HWMON_PLATFORMS:
+                            pf = HWMON_PLATFORMS[name]
+                            logging.info(f"Monitoring temperature for {pf} CPU")
+                            return hwmon.path + "/temp1_input"
+                    except Exception:
+                        pass
+        except OSError:
+            logging.info("Unable to enumerate hwmon in embedded Android runtime")
+
+        logging.info("Monitoring temperature using default thermal zone")
+        return TEMPERATURE_PATH
+"""
+if thermal_old not in proc_stats_text:
+    raise SystemExit("Moonraker proc_stats thermal patch point changed")
+proc_stats_text = proc_stats_text.replace(thermal_old, thermal_new, 1)
+proc_stats_path.write_text(proc_stats_text)
