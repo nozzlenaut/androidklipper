@@ -52,6 +52,7 @@ database_path: {database_dir}
 [file_manager]
 config_path: {config_dir}
 log_path: {logs_dir}
+file_system_observer: none
 """.format(**p)
 
     with open(p["moonraker_config"], "w", encoding="utf-8") as cfg:
