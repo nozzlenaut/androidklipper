@@ -46,7 +46,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val safety = TextView(this).apply {
-            text = "Host test is identify-only. Full Klippy smoke applies a temporary no-pin config. Real Voron config test imports the active config from the old Moonraker host and configures the actual printer hardware, then exits as soon as Klippy reaches Ready."
+            text = "Host test is identify-only. Full Klippy smoke applies a temporary no-pin config. Real host mode imports the active Voron config, keeps Klippy running on the actual printer hardware, and starts Moonraker locally. Use Stop Host before disconnecting USB."
             textSize = 14f
             setPadding(0, 16, 0, 8)
         }
@@ -69,7 +69,7 @@ class MainActivity : Activity() {
             setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = true) }
         }
         val realConfig = Button(this).apply {
-            text = "Import NUC config + run real Voron startup test"
+            text = "Import NUC config + start Klipper/Moonraker"
             setOnClickListener {
                 requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
             }
@@ -79,7 +79,7 @@ class MainActivity : Activity() {
             setOnClickListener { copyReport() }
         }
         val stop = Button(this).apply {
-            text = "Stop host test"
+            text = "Stop Klipper/Moonraker host"
             setOnClickListener {
                 stopService(Intent(this@MainActivity, KlipperHostService::class.java))
                 status.text = "Host test stopped."
@@ -186,7 +186,7 @@ class MainActivity : Activity() {
                 realConfig
             )
             status.text = when {
-                realConfig -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the real Voron config test."
+                realConfig -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start persistent Klipper and Moonraker."
                 fullSmoke -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the smoke test."
                 else -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the host test."
             }
