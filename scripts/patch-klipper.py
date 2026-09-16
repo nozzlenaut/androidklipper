@@ -75,8 +75,6 @@ if len(sys.argv) >= 5:
 
 
 if len(sys.argv) >= 6:
-    stats_path = Path(sys.argv[5])
-    stats_text = stats_path.read_text()
     stats_needle = """        self.last_load_avg = os.getloadavg()[0]
 """
     stats_replacement = """        # Python on Android does not expose os.getloadavg().  System load is
@@ -91,8 +89,12 @@ if len(sys.argv) >= 6:
             except Exception:
                 self.last_load_avg = 0.
 """
-    if stats_needle not in stats_text:
-        raise SystemExit(
-            "Klippy statistics patch point changed; inspect upstream before updating the pin")
-    stats_path.write_text(
-        stats_text.replace(stats_needle, stats_replacement, 1))
+    for stats_arg in sys.argv[5:]:
+        stats_path = Path(stats_arg)
+        stats_text = stats_path.read_text()
+        if stats_needle not in stats_text:
+            raise SystemExit(
+                "Klippy statistics patch point changed in %s; inspect upstream before updating the pin"
+                % stats_path)
+        stats_path.write_text(
+            stats_text.replace(stats_needle, stats_replacement, 1))
