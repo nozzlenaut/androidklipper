@@ -82,7 +82,7 @@ chaquopy {
             install("tornado==6.5.2")
             install("distro==1.9.0")
             install("inotify-simple==2.0.1")
-            install("libnacl==2.1.0")
+            install("PyNaCl==1.5.0")
             install("importlib_metadata==8.7.0")
         }
         extractPackages("klipper_vendor")
