@@ -169,7 +169,7 @@ assert "moonraker_runner" in host_service
 assert "Moonraker READY: http://127.0.0.1:7125" in host_service
 assert "printer_data/comms/klippy.sock" in host_service
 
-assert 'install("tornado==6.5.5")' in build
+assert 'install("tornado==6.5.2")' in build
 assert 'install("streaming-form-data==1.19.1")' in build
 assert 'install("distro==1.9.0")' in build
 assert 'install("inotify-simple==2.0.1")' in build
