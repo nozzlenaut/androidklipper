@@ -80,6 +80,9 @@ jobs:
       - name: Vendor pinned Klipper
         run: bash scripts/vendor-klipper.sh
 
+      - name: Vendor pinned Moonraker
+        run: bash scripts/vendor-moonraker.sh
+
       - name: Static project checks
         run: python3 scripts/check-project.py
 
