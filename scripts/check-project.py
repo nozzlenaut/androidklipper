@@ -81,6 +81,10 @@ assert "stablePtyMap" in host_service
 assert "probe_full_klippy" in host_service
 assert "probe_real_config_from_moonraker" in host_service
 assert "http://192.168.1.83:7125" in host_service
+assert "START_NOT_STICKY" in host_service
+assert "return START_STICKY" not in host_service
+assert "Only arm a PTY for full/real Klippy after the MCU has" in host_service
+assert "toString().also" in host_service
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "def probe_pipe_open(path):" in hostprobe
