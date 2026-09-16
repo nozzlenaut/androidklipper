@@ -18,6 +18,7 @@ printf "__version__ = 'v0.10.0-20-g9008485-android'\n" > "$PY_VENDOR/__version__
 
 python3 "$ROOT/scripts/patch-moonraker.py" \
   "$PY_VENDOR/server.py" \
-  "$PY_VENDOR/components/application.py"
+  "$PY_VENDOR/components/application.py" \
+  "$PY_VENDOR/components/machine.py"
 
 echo "Vendored Moonraker $MOONRAKER_COMMIT"
