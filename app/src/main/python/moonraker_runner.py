@@ -81,7 +81,7 @@ def run(work_dir):
         "moonraker",
         "-d", p["data_root"],
         "-c", p["moonraker_config"],
-        "-n",
+        "-l", os.path.join(p["logs_dir"], "moonraker.log"),
     ]
     old_argv = sys.argv
     _set_status("starting: http://127.0.0.1:7125")
@@ -92,8 +92,21 @@ def run(work_dir):
         except SystemExit as exc:
             code = exc.code
             if code not in (0, None):
-                _set_status("error: Moonraker exited %s" % code)
-                return "Moonraker exited: %s" % code
+                log_path = os.path.join(p["logs_dir"], "moonraker.log")
+                tail = ""
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as log_file:
+                        lines = log_file.readlines()
+                    tail = "".join(lines[-80:]).strip()
+                except Exception as log_exc:
+                    tail = "Unable to read Moonraker log: %s: %s" % (
+                        type(log_exc).__name__, log_exc
+                    )
+                detail = "Moonraker exited %s" % code
+                if tail:
+                    detail += "\n\n--- moonraker.log tail ---\n" + tail
+                _set_status("error: " + detail)
+                return detail
         _set_status("stopped")
         return "Moonraker stopped"
     except BaseException as exc:
