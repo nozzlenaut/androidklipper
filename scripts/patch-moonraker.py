@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+server_path = Path(sys.argv[1])
+text = server_path.read_text()
+
+components_old = """CORE_COMPONENTS = [
+    'dbus_manager', 'database', 'file_manager', 'authorization',
+    'klippy_apis', 'machine', 'data_store', 'shell_command',
+    'proc_stats', 'job_state', 'job_queue', 'history',
+    'http_client', 'announcements', 'webcam', 'extensions'
+]
+"""
+components_new = """# AndroidKlipper runs Moonraker on localhost and uses machine provider 'none'.
+# DBus has no useful role on Android, and authorization is intentionally omitted
+# while the API is loopback-only.  The rest is upstream Moonraker.
+CORE_COMPONENTS = [
+    'database', 'file_manager',
+    'klippy_apis', 'machine', 'data_store', 'shell_command',
+    'proc_stats', 'job_state', 'job_queue', 'history',
+    'http_client', 'announcements', 'webcam', 'extensions'
+]
+
+_ANDROID_CURRENT_SERVER = None
+
+def android_request_stop() -> bool:
+    """Request a clean terminate from an Android/Kotlin service thread."""
+    server = _ANDROID_CURRENT_SERVER
+    if server is None:
+        return False
+    try:
+        server.event_loop.register_callback(server._stop_server, "terminate")
+        return True
+    except Exception:
+        logging.exception("Android Moonraker stop request failed")
+        return False
+"""
+if components_old not in text:
+    raise SystemExit("Moonraker core component patch point changed")
+text = text.replace(components_old, components_new, 1)
+
+signal_old = """    async def server_init(self, start_server: bool = True) -> None:
+        self.event_loop.add_signal_handler(
+            signal.SIGTERM, self._handle_term_signal)
+"""
+signal_new = """    async def server_init(self, start_server: bool = True) -> None:
+        # AndroidKlipper runs Moonraker from an embedded Python worker thread.
+        # POSIX signal handlers may be unavailable outside Python's main thread.
+        try:
+            self.event_loop.add_signal_handler(
+                signal.SIGTERM, self._handle_term_signal)
+        except (NotImplementedError, RuntimeError, ValueError):
+            logging.info("Signal handlers unavailable in embedded Android runtime")
+"""
+if signal_old not in text:
+    raise SystemExit("Moonraker signal add patch point changed")
+text = text.replace(signal_old, signal_new, 1)
+
+remove_old = """        self.exit_reason = exit_reason
+        self.event_loop.remove_signal_handler(signal.SIGTERM)
+        self.app_running_evt.set()
+"""
+remove_new = """        self.exit_reason = exit_reason
+        try:
+            self.event_loop.remove_signal_handler(signal.SIGTERM)
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass
+        self.app_running_evt.set()
+"""
+if remove_old not in text:
+    raise SystemExit("Moonraker signal remove patch point changed")
+text = text.replace(remove_old, remove_new, 1)
+
+launch_old = """    try:
+        server = Server(app_args, log_manager, eventloop)
+        server.load_components()
+"""
+launch_new = """    global _ANDROID_CURRENT_SERVER
+    try:
+        server = Server(app_args, log_manager, eventloop)
+        _ANDROID_CURRENT_SERVER = server
+        server.load_components()
+"""
+if launch_old not in text:
+    raise SystemExit("Moonraker current server patch point changed")
+text = text.replace(launch_old, launch_new, 1)
+
+text = text.replace(
+    """    del server
+    return None
+""",
+    """    _ANDROID_CURRENT_SERVER = None
+    del server
+    return None
+""",
+    1,
+)
+
+server_path.write_text(text)
