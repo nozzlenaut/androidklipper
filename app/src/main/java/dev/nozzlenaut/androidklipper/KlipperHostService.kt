@@ -58,6 +58,12 @@ class KlipperHostService : Service() {
     }
 
     private fun rebuildSessions(fullSmoke: Boolean, realConfig: Boolean) {
+        if (Python.isStarted()) {
+            val python = Python.getInstance()
+            runCatching { python.getModule("moonraker_runner").callAttr("stop") }
+            runCatching { python.getModule("persistent_host").callAttr("stop") }
+            Thread.sleep(150)
+        }
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
 
