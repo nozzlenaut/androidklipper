@@ -11,6 +11,10 @@ required = [
     "app/src/main/python/hostprobe.py",
     "scripts/patch-klipper.py",
     "scripts/vendor-klipper.sh",
+    "scripts/patch-moonraker.py",
+    "scripts/vendor-moonraker.sh",
+    "app/src/main/python/persistent_host.py",
+    "app/src/main/python/moonraker_runner.py",
 ]
 for rel in required:
     assert (root / rel).exists(), f"missing {rel}"
@@ -122,6 +126,7 @@ assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
 assert '"$PY_VENDOR/klippy/klippy.py"' in vendor
 assert '"$PY_VENDOR/klippy/extras/statistics.py"' in vendor
 assert '"$PY_ROOT/extras/statistics.py"' in vendor
+assert '"$PY_VENDOR/klippy/gcode.py"' in vendor
 assert 'cp -a "$VENDOR/klippy/extras" "$PY_ROOT/"' in vendor
 assert 'cp -a "$VENDOR/klippy/kinematics" "$PY_ROOT/"' in vendor
 
@@ -134,3 +139,36 @@ assert "ptyBaud" not in rewriter
 assert 'out += "baud:' not in rewriter
 
 print("project invariants: PASS")
+
+
+moon_vendor = (root / "scripts/vendor-moonraker.sh").read_text()
+assert "9008485843740c93e0154ccbdac1fc2b02b03aaa" in moon_vendor
+assert 'cp -a "$VENDOR/moonraker" "$PY_VENDOR"' in moon_vendor
+assert "patch-moonraker.py" in moon_vendor
+
+moon_patch = (root / "scripts/patch-moonraker.py").read_text()
+assert "'database', 'file_manager'" in moon_patch
+assert "'dbus_manager'" not in moon_patch.split("components_new", 1)[1].split('"""', 1)[0]
+assert "'authorization'" not in moon_patch.split("components_new", 1)[1].split('"""', 1)[0]
+assert "android_request_stop" in moon_patch
+assert "Signal handlers unavailable in embedded Android runtime" in moon_patch
+
+persistent = (root / "app/src/main/python/persistent_host.py").read_text()
+assert '"apiserver": api_socket' in persistent
+assert '"gcode_fd": None' in persistent
+assert '"printer_data"' in persistent
+assert '"comms", "klippy.sock"' in persistent
+assert "def stop():" in persistent
+assert "def run(base_url, stable_mapping, c_helper_path, work_dir):" in persistent
+
+moon_runner = (root / "app/src/main/python/moonraker_runner.py").read_text()
+assert "host: 127.0.0.1" in moon_runner
+assert "port: 7125" in moon_runner
+assert "provider: none" in moon_runner
+assert "klippy_uds_address: {klippy_socket}" in moon_runner
+assert "server.android_request_stop()" in moon_runner
+
+assert "persistent_host" in host_service
+assert "moonraker_runner" in host_service
+assert "Moonraker READY: http://127.0.0.1:7125" in host_service
+assert "printer_data/comms/klippy.sock" in host_service
