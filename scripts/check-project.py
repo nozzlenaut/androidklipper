@@ -173,7 +173,6 @@ assert 'install("tornado==6.5.2")' in build
 assert 'install("distro==1.9.0")' in build
 assert 'install("inotify-simple==2.0.1")' in build
 
-print("project invariants: PASS")
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch
 assert "File uploads disabled: streaming-form-data is unavailable" in moon_patch
@@ -184,3 +183,5 @@ assert "_ANDROID_LAST_ERROR = traceback.format_exc()" in moon_patch
 assert "direct Moonraker traceback" in moon_runner
 assert "file_system_observer: none" in moon_runner
 assert '"-l", os.path.join(p["logs_dir"], "moonraker.log")' in moon_runner
+
+print("project invariants: PASS")
