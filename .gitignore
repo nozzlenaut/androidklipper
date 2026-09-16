@@ -8,3 +8,5 @@ vendor/klipper/
 *.apk
 *.aab
 app/src/main/python/klipper_vendor/
+__pycache__/
+*.pyc
