@@ -18,7 +18,132 @@ done
 
 unzip -p "$APK" assets/chaquopy/app.imy > "$TMP/app.imy"
 unzip -Z1 "$TMP/app.imy" | grep -q '^hostprobe.pyc$'
-unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_runner.pyc$'
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_runner.pyc
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/klippy.py$'
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/serialhdl.py$'
+
+for abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+APKSIGNER="${ANDROID_SDK_ROOT:-}/build-tools/35.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-256 digest|Signer #1 certificate DN'
+fi
+
+echo "APK packaging invariants: PASS"
+
+unzip -Z1 "$TMP/app.imy" | grep -q '^persistent_host.pyc
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/klippy.py$'
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/serialhdl.py$'
+
+for abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+APKSIGNER="${ANDROID_SDK_ROOT:-}/build-tools/35.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-256 digest|Signer #1 certificate DN'
+fi
+
+echo "APK packaging invariants: PASS"
+
+unzip -Z1 "$TMP/app.imy" | grep -q '^moonraker_runner.pyc
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/klippy.py$'
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/serialhdl.py$'
+
+for abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+APKSIGNER="${ANDROID_SDK_ROOT:-}/build-tools/35.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-256 digest|Signer #1 certificate DN'
+fi
+
+echo "APK packaging invariants: PASS"
+
+unzip -Z1 "$TMP/app.imy" | grep -q '^moonraker/server.pyc
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/klippy.py$'
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/serialhdl.py$'
+
+for abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+APKSIGNER="${ANDROID_SDK_ROOT:-}/build-tools/35.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-256 digest|Signer #1 certificate DN'
+fi
+
+echo "APK packaging invariants: PASS"
+
+unzip -Z1 "$TMP/app.imy" | grep -q '^moonraker/components/application.pyc
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/klippy.py$'
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/serialhdl.py$'
+
+for abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+APKSIGNER="${ANDROID_SDK_ROOT:-}/build-tools/35.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-256 digest|Signer #1 certificate DN'
+fi
+
+echo "APK packaging invariants: PASS"
+
+unzip -Z1 "$TMP/app.imy" | grep -q '^moonraker/components/klippy_connection.pyc
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/klippy.py$'
+unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/serialhdl.py$'
+
+for abi in arm64-v8a armeabi-v7a; do
+  unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
+  for module in fcntl termios select; do
+    unzip -Z1 "$TMP/stdlib-$abi.imy" | grep -Eq "^${module}\\.cpython-311.*\\.so$"
+  done
+done
+
+unzip -p "$APK" assets/chaquopy/stdlib-common.imy > "$TMP/stdlib-common.imy"
+unzip -Z1 "$TMP/stdlib-common.imy" | grep -q '^pty.pyc$'
+
+APKSIGNER="${ANDROID_SDK_ROOT:-}/build-tools/35.0.0/apksigner"
+if [[ -x "$APKSIGNER" ]]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-256 digest|Signer #1 certificate DN'
+fi
+
+echo "APK packaging invariants: PASS"
+
 unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/klippy.py$'
 unzip -Z1 "$TMP/app.imy" | grep -q '^klipper_vendor/klippy/serialhdl.py$'
 
