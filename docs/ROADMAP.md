@@ -16,22 +16,29 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
 - [x] runtime-only config rewriter + unit test
 - [x] CI produces installable APK
 - [x] Fire HD 8: 3 USB MCUs visible simultaneously
-- [ ] Fire HD 8: stable USB serial IDs confirmed in final native-app report
+- [x] Fire HD 8: stable USB serial IDs confirmed in native-app report
 - [x] Fire HD 8: 3 PTYs created simultaneously
-- [ ] Fire HD 8: pySerial opens all PTYs
+- [x] Fire HD 8: Klipper opens all PTYs as raw byte pipes (pySerial intentionally bypassed for Android PTYs)
 - [x] Fire HD 8: prebuilt c_helper loads through cffi
 
 ## M2 - run real Klippy inside the app
 
-- [ ] start/stop Klippy under service lifecycle
-- [ ] connect a harmless `kinematics: none` config to one MCU
-- [ ] connect all USB MCUs using a runtime config mapping
+- [x] start/stop diagnostic Klippy under service lifecycle
+- [x] connect harmless `kinematics: none` config to physical MCUs
+- [x] connect all three USB MCUs using runtime PTY mapping
+- [x] full no-pin Klippy reaches Ready on all three MCUs (build 117)
+- [x] import active Voron config and reach the real-config Ready callback path (build 136)
+- [x] patch Android-missing `os.getloadavg()` crash in Klipper statistics (build 141; hardware re-test pending)
+- [x] require successful MCU identify before a PTY can enter full/real Klippy
+- [x] diagnostic service is non-sticky to prevent ambiguous Android restarts
 - [ ] clean recovery after USB detach/reconnect
+- [ ] persistent production Klippy lifecycle (do not exit at Ready)
 - [ ] 8/24/48-hour idle soak tests
 
 ## M3 - useful printer host
 
-- [ ] import a full printer config tree
+- [x] import a full printer config tree from the existing Moonraker host (diagnostic migration path)
+- [ ] persist/manage imported config locally without requiring the old host
 - [ ] Moonraker
 - [ ] bundled Mainsail
 - [ ] local web UI
@@ -70,3 +77,11 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
   - rp2040: `3033393834057C77`
   - rp2040: `504450610844C31C`
   - dynamic Klipper packages `extras` and `kinematics` verified under Chaquopy
+
+
+## Current Android compatibility notes
+
+- Klipper statistics used `os.getloadavg()`, which Chaquopy Python on Android does not expose. AndroidKlipper patches this to read `/proc/loadavg` when available and otherwise report zero.
+- The current real-config diagnostic exits at Ready; it is not yet the persistent production host.
+- Resonance calibration is a later compatibility item: Klipper lazily requires NumPy for shaper analysis, uses multiprocessing for some calculations/writes, and uses Linux-style `/tmp` output paths. These do not block normal printer startup and are intentionally not bundled into the current startup-test build.
+- USB detach/reconnect handling still needs a dedicated production lifecycle path before long-running printer use.
