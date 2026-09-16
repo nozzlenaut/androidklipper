@@ -24,6 +24,10 @@ CORE_COMPONENTS = [
 ]
 
 _ANDROID_CURRENT_SERVER = None
+_ANDROID_LAST_ERROR = ""
+
+def android_get_last_error() -> str:
+    return _ANDROID_LAST_ERROR
 
 def android_request_stop() -> bool:
     # Request a clean terminate from an Android/Kotlin service thread.
@@ -77,7 +81,8 @@ launch_old = """    try:
         server = Server(app_args, log_manager, eventloop)
         server.load_components()
 """
-launch_new = """    global _ANDROID_CURRENT_SERVER
+launch_new = """    global _ANDROID_CURRENT_SERVER, _ANDROID_LAST_ERROR
+    _ANDROID_LAST_ERROR = ""
     try:
         server = Server(app_args, log_manager, eventloop)
         _ANDROID_CURRENT_SERVER = server
@@ -86,6 +91,46 @@ launch_new = """    global _ANDROID_CURRENT_SERVER
 if launch_old not in text:
     raise SystemExit("Moonraker current server patch point changed")
 text = text.replace(launch_old, launch_new, 1)
+
+config_error_old = """    except confighelper.ConfigError as e:
+        logging.exception("Server Config Error")
+"""
+config_error_new = """    except confighelper.ConfigError as e:
+        _ANDROID_LAST_ERROR = traceback.format_exc()
+        _ANDROID_CURRENT_SERVER = None
+        logging.exception("Server Config Error")
+"""
+if config_error_old not in text:
+    raise SystemExit("Moonraker config error patch point changed")
+text = text.replace(config_error_old, config_error_new, 1)
+
+moon_error_old = """    except Exception:
+        logging.exception("Moonraker Error")
+        return 1
+"""
+moon_error_new = """    except Exception:
+        _ANDROID_LAST_ERROR = traceback.format_exc()
+        _ANDROID_CURRENT_SERVER = None
+        logging.exception("Moonraker Error")
+        return 1
+"""
+if moon_error_old not in text:
+    raise SystemExit("Moonraker load error patch point changed")
+text = text.replace(moon_error_old, moon_error_new, 1)
+
+running_error_old = """    except Exception:
+        logging.exception("Server Running Error")
+        return 1
+"""
+running_error_new = """    except Exception:
+        _ANDROID_LAST_ERROR = traceback.format_exc()
+        _ANDROID_CURRENT_SERVER = None
+        logging.exception("Server Running Error")
+        return 1
+"""
+if running_error_old not in text:
+    raise SystemExit("Moonraker running error patch point changed")
+text = text.replace(running_error_old, running_error_new, 1)
 
 text = text.replace(
     """    del server
