@@ -79,6 +79,11 @@ chaquopy {
             install("cffi==1.15.1")
             install("Jinja2==3.1.6")
             install("MarkupSafe==3.0.3")
+            install("tornado==6.5.5")
+            install("streaming-form-data==1.19.1")
+            install("distro==1.9.0")
+            install("inotify-simple==2.0.1")
+            install("importlib_metadata==8.7.0")
         }
         extractPackages("klipper_vendor")
     }
