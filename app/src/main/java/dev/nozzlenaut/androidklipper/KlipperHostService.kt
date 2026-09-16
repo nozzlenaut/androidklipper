@@ -15,6 +15,8 @@ import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 
@@ -23,6 +25,12 @@ class KlipperHostService : Service() {
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
     private val hostExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "androidklipper-host").apply { isDaemon = true }
+    }
+    private val klippyExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "androidklipper-klippy").apply { isDaemon = true }
+    }
+    private val moonrakerExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "androidklipper-moonraker").apply { isDaemon = true }
     }
     private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
 
@@ -36,7 +44,7 @@ class KlipperHostService : Service() {
         val fullSmoke = intent?.getBooleanExtra(EXTRA_FULL_SMOKE, false) ?: false
         val realConfig = intent?.getBooleanExtra(EXTRA_REAL_CONFIG, false) ?: false
         val startText = when {
-            realConfig -> "Starting real Voron config test…"
+            realConfig -> "Starting persistent Klipper + Moonraker…"
             fullSmoke -> "Starting full Klippy smoke test…"
             else -> "Starting USB host test…"
         }
@@ -125,24 +133,78 @@ class KlipperHostService : Service() {
 
         if (realConfig) {
             if (!allIdentified || stablePtyMap.size != supported.size) {
-                statusLines += "Real config test SKIPPED: every supported USB device must identify as a Klipper MCU first."
+                statusLines += "Persistent host SKIPPED: every supported USB device must identify as a Klipper MCU first."
             } else {
+                val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
+                val klippySocket = File(filesDir, "printer_data/comms/klippy.sock")
                 publishStatus(
-                    "AndroidKlipper real Voron config test\n\n" +
+                    "AndroidKlipper persistent host\n\n" +
                         statusLines.joinToString("\n\n") +
-                        "\n\nImporting active config from Moonraker and starting real Klippy…"
+                        "\n\nImporting active config and starting persistent Klippy…"
                 )
-                try {
-                    val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
-                    statusLines += hostprobe.callAttr(
-                        "probe_real_config_from_moonraker",
-                        CONFIG_SOURCE_URL,
-                        stableMapping,
-                        helper.absolutePath,
-                        filesDir.absolutePath
-                    ).toString()
-                } catch (t: Throwable) {
-                    statusLines += "Real Voron config ERROR ${t.javaClass.simpleName}: ${t.message}"
+
+                klippyExecutor.execute {
+                    try {
+                        val persistent = Python.getInstance().getModule("persistent_host")
+                        val result = persistent.callAttr(
+                            "run",
+                            CONFIG_SOURCE_URL,
+                            stableMapping,
+                            helper.absolutePath,
+                            filesDir.absolutePath
+                        ).toString()
+                        publishStatus("Persistent Klippy stopped\n\n$result")
+                    } catch (t: Throwable) {
+                        publishStatus("Persistent Klippy ERROR ${t.javaClass.simpleName}: ${t.message}")
+                    }
+                }
+
+                var klippySocketReady = false
+                for (attempt in 0 until 300) {
+                    if (klippySocket.exists()) {
+                        klippySocketReady = true
+                        break
+                    }
+                    Thread.sleep(100)
+                }
+
+                if (!klippySocketReady) {
+                    statusLines += "Persistent Klippy ERROR: API socket did not appear."
+                } else {
+                    statusLines += "Persistent Klippy API: ${klippySocket.absolutePath}"
+                    publishStatus(
+                        "AndroidKlipper persistent host\n\n" +
+                            statusLines.joinToString("\n\n") +
+                            "\n\nStarting Moonraker on http://127.0.0.1:7125 …"
+                    )
+
+                    moonrakerExecutor.execute {
+                        try {
+                            val runner = Python.getInstance().getModule("moonraker_runner")
+                            val result = runner.callAttr("run", filesDir.absolutePath).toString()
+                            publishStatus("Moonraker stopped\n\n$result")
+                        } catch (t: Throwable) {
+                            publishStatus("Moonraker ERROR ${t.javaClass.simpleName}: ${t.message}")
+                        }
+                    }
+
+                    var moonrakerReady = false
+                    for (attempt in 0 until 300) {
+                        try {
+                            Socket().use { socket ->
+                                socket.connect(InetSocketAddress("127.0.0.1", 7125), 200)
+                            }
+                            moonrakerReady = true
+                            break
+                        } catch (_: Throwable) {
+                            Thread.sleep(100)
+                        }
+                    }
+                    statusLines += if (moonrakerReady) {
+                        "Moonraker READY: http://127.0.0.1:7125"
+                    } else {
+                        "Moonraker ERROR: port 7125 did not open."
+                    }
                 }
             }
         } else if (fullSmoke) {
@@ -171,7 +233,7 @@ class KlipperHostService : Service() {
             "No supported USB serial devices with permission."
         } else {
             val title = when {
-                realConfig -> "AndroidKlipper real Voron config test"
+                realConfig -> "AndroidKlipper persistent host"
                 fullSmoke -> "AndroidKlipper full smoke test"
                 else -> "AndroidKlipper host test"
             }
@@ -215,9 +277,16 @@ class KlipperHostService : Service() {
     }
 
     override fun onDestroy() {
+        if (Python.isStarted()) {
+            val python = Python.getInstance()
+            runCatching { python.getModule("moonraker_runner").callAttr("stop") }
+            runCatching { python.getModule("persistent_host").callAttr("stop") }
+        }
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
         hostExecutor.shutdownNow()
+        moonrakerExecutor.shutdownNow()
+        klippyExecutor.shutdownNow()
         statusServer.close()
         super.onDestroy()
     }
