@@ -12,7 +12,15 @@ class UsbPermissionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_USB_PERMISSION) return
         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-        if (!granted) return
+        if (!granted) {
+            context.getSharedPreferences(
+                KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE
+            ).edit()
+                .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
+                .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
+                .apply()
+            return
+        }
         val prefs = context.getSharedPreferences("usb_permission_mode", Context.MODE_PRIVATE)
         val fullSmoke = prefs.getBoolean(
             KlipperHostService.EXTRA_FULL_SMOKE,
@@ -33,6 +41,11 @@ class UsbPermissionReceiver : BroadcastReceiver() {
             requestNext(context, manager, next, fullSmoke, realConfig)
         } else if (supported.isNotEmpty()) {
             KlipperHostService.start(context, fullSmoke, realConfig)
+            context.getSharedPreferences(
+                KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE
+            ).edit()
+                .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
+                .apply()
             prefs.edit().clear().apply()
         }
     }
