@@ -195,6 +195,12 @@ assert "setLayerType(View.LAYER_TYPE_HARDWARE" in mainsail_activity
 
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch
+upload_compat = (root / "app/src/main/python/streaming_form_data/__init__.py").read_text()
+upload_targets = (root / "app/src/main/python/streaming_form_data/targets.py").read_text()
+assert "class StreamingFormDataParser" in upload_compat
+assert "cgi.FieldStorage" in upload_compat
+assert "class FileTarget" in upload_targets
+assert "class SHA256Target" in upload_targets
 assert "File uploads disabled: streaming-form-data is unavailable" in moon_patch
 
 assert "android_get_last_error" in moon_patch
