@@ -184,6 +184,15 @@ application_path.write_text(application_text)
 
 
 machine_text = machine_path.read_text()
+network_cmd_old = 'self.addr_cmd = shell_cmd.build_shell_command("ip -json -det address")'
+network_cmd_new = """# Android apps cannot rely on the Linux iproute2 binary. Moonraker network
+        # metadata is optional here; AndroidKlipper already discovers the LAN
+        # address for its server configuration.
+        self.addr_cmd = shell_cmd.build_shell_command("echo '[]'")"""
+if network_cmd_old not in machine_text:
+    raise SystemExit("Moonraker Android network command patch point changed")
+machine_text = machine_text.replace(network_cmd_old, network_cmd_new, 1)
+
 system_path_constants = """SD_CID_PATH = "/sys/block/mmcblk0/device/cid"
 SD_CSD_PATH = "/sys/block/mmcblk0/device/csd"
 """
