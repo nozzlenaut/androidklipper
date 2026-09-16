@@ -25,7 +25,7 @@ CORE_COMPONENTS = [
 _ANDROID_CURRENT_SERVER = None
 
 def android_request_stop() -> bool:
-    """Request a clean terminate from an Android/Kotlin service thread."""
+    # Request a clean terminate from an Android/Kotlin service thread.
     server = _ANDROID_CURRENT_SERVER
     if server is None:
         return False
