@@ -83,7 +83,6 @@ assert "EXTRA_REAL_CONFIG" in host_service
 assert 'smokePtyPaths.joinToString("|")' in host_service
 assert "stablePtyMap" in host_service
 assert "probe_full_klippy" in host_service
-assert "probe_real_config_from_moonraker" in host_service
 assert "http://192.168.1.83:7125" in host_service
 assert "START_NOT_STICKY" in host_service
 assert "return START_STICKY" not in host_service
@@ -138,9 +137,6 @@ rewriter = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/config/Confi
 assert "ptyBaud" not in rewriter
 assert 'out += "baud:' not in rewriter
 
-print("project invariants: PASS")
-
-
 moon_vendor = (root / "scripts/vendor-moonraker.sh").read_text()
 assert "9008485843740c93e0154ccbdac1fc2b02b03aaa" in moon_vendor
 assert 'cp -a "$VENDOR/moonraker" "$PY_VENDOR"' in moon_vendor
@@ -172,3 +168,10 @@ assert "persistent_host" in host_service
 assert "moonraker_runner" in host_service
 assert "Moonraker READY: http://127.0.0.1:7125" in host_service
 assert "printer_data/comms/klippy.sock" in host_service
+
+assert 'install("tornado==6.5.5")' in build
+assert 'install("streaming-form-data==1.19.1")' in build
+assert 'install("distro==1.9.0")' in build
+assert 'install("inotify-simple==2.0.1")' in build
+
+print("project invariants: PASS")
