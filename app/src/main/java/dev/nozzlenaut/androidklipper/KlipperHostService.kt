@@ -209,7 +209,11 @@ class KlipperHostService : Service() {
                     statusLines += if (moonrakerReady) {
                         "Moonraker READY: http://127.0.0.1:7125"
                     } else {
-                        "Moonraker ERROR: port 7125 did not open."
+                        val runnerStatus = runCatching {
+                            Python.getInstance().getModule("moonraker_runner")
+                                .callAttr("get_status").toString()
+                        }.getOrElse { "status unavailable: ${it.message}" }
+                        "Moonraker ERROR: port 7125 did not open.\nMoonraker runtime: $runnerStatus"
                     }
                 }
             }
