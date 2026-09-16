@@ -15,11 +15,11 @@ components_old = """CORE_COMPONENTS = [
     'http_client', 'announcements', 'webcam', 'extensions'
 ]
 """
-components_new = """# AndroidKlipper runs Moonraker on localhost and uses machine provider 'none'.
-# DBus has no useful role on Android, and authorization is intentionally omitted
-# while the API is loopback-only.  The rest is upstream Moonraker.
+components_new = """# AndroidKlipper uses machine provider 'none' and does not need DBus.
+# Keep Moonraker's normal authorization component so LAN access can be
+# restricted to the active local subnet when the API is exposed off-device.
 CORE_COMPONENTS = [
-    'database', 'file_manager',
+    'database', 'file_manager', 'authorization',
     'klippy_apis', 'machine', 'data_store', 'shell_command',
     'proc_stats', 'job_state', 'job_queue', 'history',
     'http_client', 'announcements', 'webcam', 'extensions'
