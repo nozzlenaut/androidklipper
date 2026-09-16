@@ -144,8 +144,9 @@ assert "patch-moonraker.py" in moon_vendor
 
 moon_patch = (root / "scripts/patch-moonraker.py").read_text()
 assert "'database', 'file_manager'" in moon_patch
-assert "'dbus_manager'" not in moon_patch.split("components_new", 1)[1].split('"""', 1)[0]
-assert "'authorization'" in moon_patch.split("components_new", 1)[1].split('"""', 1)[0]
+components_new_block = moon_patch.split('components_new = """', 1)[1].split('"""', 1)[0]
+assert "'dbus_manager'" not in components_new_block
+assert "'authorization'" in components_new_block
 assert "android_request_stop" in moon_patch
 assert "Signal handlers unavailable in embedded Android runtime" in moon_patch
 
