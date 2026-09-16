@@ -44,7 +44,9 @@ class KlipperHostService : Service() {
         // USB permission callbacks can arrive close together for multi-MCU printers.
         // Serialize rebuilds so two service starts never fight over the same device.
         hostExecutor.execute { rebuildSessions(fullSmoke, realConfig) }
-        return START_STICKY
+        // This is still a diagnostic host. Never let Android silently recreate
+        // it later with a null Intent and an ambiguous/default test mode.
+        return START_NOT_STICKY
     }
 
     private fun rebuildSessions(fullSmoke: Boolean, realConfig: Boolean) {
