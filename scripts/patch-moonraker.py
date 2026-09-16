@@ -217,6 +217,32 @@ for old, new in [
         raise SystemExit("Moonraker machine exists patch point changed: " + old)
     machine_text = machine_text.replace(old, new, 1)
 
+sd_init_old = """            'sd_info': self._get_sdcard_info(),
+"""
+sd_init_new = """            'sd_info': self._android_safe_sdcard_info(),
+"""
+if sd_init_old not in machine_text:
+    raise SystemExit("Moonraker SD info init patch point changed")
+machine_text = machine_text.replace(sd_init_old, sd_init_new, 1)
+
+sd_method_anchor = """    def _init_allowed_services(self) -> None:
+"""
+sd_method_insert = """    def _android_safe_sdcard_info(self) -> Dict[str, Any]:
+        # Android SELinux may deny access to otherwise visible MMC sysfs nodes.
+        # SD-card metadata is optional diagnostics; never let it prevent the
+        # embedded Moonraker server from starting.
+        try:
+            return self._get_sdcard_info()
+        except OSError:
+            logging.info("Unable to read SD-card metadata in embedded Android runtime")
+            return {}
+
+    def _init_allowed_services(self) -> None:
+"""
+if sd_method_anchor not in machine_text:
+    raise SystemExit("Moonraker SD info method anchor changed")
+machine_text = machine_text.replace(sd_method_anchor, sd_method_insert, 1)
+
 machine_path.write_text(machine_text)
 
 
