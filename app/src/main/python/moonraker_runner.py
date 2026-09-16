@@ -75,6 +75,8 @@ trusted_clients:
   {trusted_subnet}
 cors_domains:
   http://{lan_ip}:*
+  http://127.0.0.1:*
+  http://localhost:*
   http://my.mainsail.xyz
   https://my.mainsail.xyz
 
