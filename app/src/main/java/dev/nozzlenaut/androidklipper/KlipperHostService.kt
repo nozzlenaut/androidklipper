@@ -94,8 +94,15 @@ class KlipperHostService : Service() {
             try {
                 val connection = usbManager.openDevice(device)
                     ?: error("UsbManager.openDevice returned null")
-                val serial = runCatching { connection.serial }.getOrNull()
-                val stableId = serial?.takeIf { it.isNotBlank() }
+                // Prefer UsbDevice's permission-aware serial number. Fire OS can
+                // intermittently return null from UsbDeviceConnection.serial after a
+                // CDC device has been reopened even though the device descriptor still
+                // exposes the stable Klipper MCU serial.
+                val serial = runCatching { device.serialNumber }.getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: runCatching { connection.serial }.getOrNull()
+                        ?.takeIf { it.isNotBlank() }
+                val stableId = serial
                     ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
                 val pty = PtyBridge.create()
                 val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
