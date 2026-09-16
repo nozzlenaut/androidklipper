@@ -145,7 +145,7 @@ assert "patch-moonraker.py" in moon_vendor
 moon_patch = (root / "scripts/patch-moonraker.py").read_text()
 assert "'database', 'file_manager'" in moon_patch
 assert "'dbus_manager'" not in moon_patch.split("components_new", 1)[1].split('"""', 1)[0]
-assert "'authorization'" not in moon_patch.split("components_new", 1)[1].split('"""', 1)[0]
+assert "'authorization'" in moon_patch.split("components_new", 1)[1].split('"""', 1)[0]
 assert "android_request_stop" in moon_patch
 assert "Signal handlers unavailable in embedded Android runtime" in moon_patch
 
@@ -158,7 +158,13 @@ assert "def stop():" in persistent
 assert "def run(base_url, stable_mapping, c_helper_path, work_dir):" in persistent
 
 moon_runner = (root / "app/src/main/python/moonraker_runner.py").read_text()
-assert "host: 127.0.0.1" in moon_runner
+assert "host: 0.0.0.0" in moon_runner
+assert "[authorization]" in moon_runner
+assert "trusted_clients:" in moon_runner
+assert "cors_domains:" in moon_runner
+assert "http://my.mainsail.xyz" in moon_runner
+assert "https://my.mainsail.xyz" in moon_runner
+assert 'ipaddress.ip_network(ip + "/24"' in moon_runner
 assert "port: 7125" in moon_runner
 assert "provider: none" in moon_runner
 assert "klippy_uds_address: {klippy_socket}" in moon_runner
