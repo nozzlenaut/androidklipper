@@ -177,3 +177,10 @@ print("project invariants: PASS")
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch
 assert "File uploads disabled: streaming-form-data is unavailable" in moon_patch
+
+assert "android_get_last_error" in moon_patch
+assert "_ANDROID_CURRENT_SERVER = None" in moon_patch
+assert "_ANDROID_LAST_ERROR = traceback.format_exc()" in moon_patch
+assert "direct Moonraker traceback" in moon_runner
+assert "file_system_observer: none" in moon_runner
+assert '"-l", os.path.join(p["logs_dir"], "moonraker.log")' in moon_runner
