@@ -85,3 +85,18 @@ Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured
 - The current real-config diagnostic exits at Ready; it is not yet the persistent production host.
 - Resonance calibration is a later compatibility item: Klipper lazily requires NumPy for shaper analysis, uses multiprocessing for some calculations/writes, and uses Linux-style `/tmp` output paths. These do not block normal printer startup and are intentionally not bundled into the current startup-test build.
 - USB detach/reconnect handling still needs a dedicated production lifecycle path before long-running printer use.
+
+
+## Verified real-config milestone
+- [x] Fire HD 8: full active Voron config reaches `REAL VORON CONFIG READY` against all three physical MCUs on Android
+  - build 150
+  - stm32f446xx: `3F001E001450535556323420`
+  - Nitehawk rp2040: `3033393834057C77`
+  - Eddy rp2040: `504450610844C31C`
+  - active config imported from the old Moonraker host
+  - Android runtime rewrites stable MCU IDs to dynamic PTYs
+  - host-only K-ShakeTune include skipped
+  - NUC temperature sensor stripped
+  - `restart_method` stripped for PTY transports
+  - Android `os.getloadavg()` incompatibility patched in the runtime Klipper statistics module
+  - reached Ready with no unexpected motion or heating; LEDs configured normally; no shutdown/failsafe fan observed
