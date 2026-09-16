@@ -65,6 +65,8 @@ assert "supported.firstOrNull { !manager.hasPermission(it) }" in permission_rece
 assert "manager.requestPermission(device, pending)" in permission_receiver
 assert 'getSharedPreferences("usb_permission_mode"' in permission_receiver
 assert "prefs.edit().clear().apply()" in permission_receiver
+assert "KEY_AUTO_START_IN_PROGRESS" in permission_receiver
+assert "KEY_AUTO_KIOSK_PENDING" in permission_receiver
 
 main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
 assert "Run full Klippy no-pin smoke test" in main_activity
@@ -76,6 +78,10 @@ assert "override fun onNewIntent" in main_activity
 assert "UsbPermissionReceiver.requestNext" in main_activity
 assert 'getSharedPreferences("usb_permission_mode"' in main_activity
 assert "devices.forEachIndexed" not in main_activity
+assert "Auto-start real host + Mainsail on printer USB" in main_activity
+assert "handleUsbAttach()" in main_activity
+assert "klipperCount < 3" in main_activity
+assert "maybeOpenAutoKiosk" in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "EXTRA_FULL_SMOKE" in host_service
@@ -87,6 +93,8 @@ assert "http://192.168.1.83:7125" in host_service
 assert "START_NOT_STICKY" in host_service
 assert "return START_STICKY" not in host_service
 assert "Only arm a PTY for full/real Klippy after the MCU has" in host_service
+assert "KEY_AUTO_START_USB" in host_service
+assert "KEY_AUTO_KIOSK_PENDING" in host_service
 assert "toString().also" in host_service
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
@@ -148,6 +156,7 @@ components_new_block = moon_patch.split('components_new = """', 1)[1].split('"""
 assert "'dbus_manager'" not in components_new_block
 assert "'authorization'" in components_new_block
 assert "android_request_stop" in moon_patch
+assert 'build_shell_command("echo \'[]\'")' in moon_patch
 assert "Signal handlers unavailable in embedded Android runtime" in moon_patch
 
 persistent = (root / "app/src/main/python/persistent_host.py").read_text()
