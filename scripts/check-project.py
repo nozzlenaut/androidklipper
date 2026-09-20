@@ -50,7 +50,9 @@ for name in expected:
 usb_session = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt").read_text()
 assert "port.dtr = true" not in usb_session
 assert "port.rts = true" not in usb_session
-assert "setReadTimeout(1000)" in usb_session
+assert "connection.bulkTransfer(" in usb_session
+assert "serialPort.readEndpoint" in usb_session
+assert "setReadTimeout(1000)" not in usb_session
 
 pty_bridge = (root / "app/src/main/cpp/pty_bridge.cpp").read_text()
 assert "cfmakeraw" in pty_bridge

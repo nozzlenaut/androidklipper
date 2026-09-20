@@ -19,6 +19,7 @@ class UsbSerialSession(
     private val running = AtomicBoolean(false)
     private var port: UsbSerialPort? = null
     private var ioManager: SerialInputOutputManager? = null
+    private var usbReader: Thread? = null
     private var ptyReader: Thread? = null
 
     fun start() {
@@ -56,17 +57,54 @@ class UsbSerialSession(
             // observable hardware state changes even without Klipper GPIO.
             running.set(true)
 
-            val manager = SerialInputOutputManager(serialPort, this).apply {
-                setReadBufferSize(4096)
-                setWriteBufferSize(4096)
-                // Fire OS 8 / Android 11 is unreliable with the library's
-                // default infinite-timeout read path, which uses UsbRequest.queue().
-                // A finite timeout switches reads to UsbDeviceConnection.bulkTransfer()
-                // while still returning immediately whenever USB data arrives.
-                setReadTimeout(1000)
-                start()
+            val device = driver.device
+            val isKlipperNativeUsb =
+                device.vendorId == 0x1d50 && device.productId == 0x614e
+            if (isKlipperNativeUsb) {
+                // Fire OS 8 / Android 11 has two unreliable paths in
+                // usb-serial-for-android reads:
+                //   * infinite timeout -> UsbRequest.queue() can fail
+                //   * finite timeout -> a spurious early -1 triggers GET_STATUS,
+                //     whose control transfer can also fail on otherwise healthy CDC.
+                // Klipper native USB is plain CDC bulk data, so read the already
+                // claimed endpoint directly and treat -1 as an idle/timeout result.
+                val endpoint = serialPort.readEndpoint
+                usbReader = Thread({
+                    val buf = ByteArray(4096)
+                    while (running.get()) {
+                        try {
+                            val n = connection.bulkTransfer(
+                                endpoint, buf, buf.size, 1000
+                            )
+                            if (n > 0) {
+                                val data = buf.copyOf(n)
+                                val written = pty.write(data)
+                                if (written != n) {
+                                    throw IOException(
+                                        "PTY write incomplete: wrote $written of $n bytes"
+                                    )
+                                }
+                            } else if (n < 0) {
+                                // Some Fire OS builds return -1 before the timeout
+                                // expires when no packet is pending. Avoid a hot loop.
+                                Thread.sleep(5)
+                            }
+                        } catch (_: InterruptedException) {
+                            break
+                        } catch (t: Throwable) {
+                            if (running.get()) onError(t)
+                            break
+                        }
+                    }
+                }, "usb-to-pty-${stableId.takeLast(8)}").also { it.start() }
+            } else {
+                val manager = SerialInputOutputManager(serialPort, this).apply {
+                    setReadBufferSize(4096)
+                    setWriteBufferSize(4096)
+                    start()
+                }
+                ioManager = manager
             }
-            ioManager = manager
 
             ptyReader = Thread({
                 val buf = ByteArray(4096)
@@ -108,6 +146,8 @@ class UsbSerialSession(
         running.set(false)
         runCatching { ioManager?.stop() }
         ioManager = null
+        usbReader?.interrupt()
+        usbReader = null
         runCatching { port?.close() }
         port = null
         ptyReader?.interrupt()
