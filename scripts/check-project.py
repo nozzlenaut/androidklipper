@@ -56,6 +56,10 @@ assert "setReadTimeout(1000)" not in usb_session
 assert "Thread.sleep(1)" in usb_session
 assert "Thread.sleep(5)" not in usb_session
 
+klipper_patch = (root / "scripts/patch-klipper.py").read_text()
+assert 'trsync_needle = "TRSYNC_TIMEOUT = 0.025"' in klipper_patch
+assert 'trsync_replacement = "TRSYNC_TIMEOUT = 0.050"' in klipper_patch
+
 pty_bridge = (root / "app/src/main/cpp/pty_bridge.cpp").read_text()
 assert "cfmakeraw" in pty_bridge
 assert "tcsetattr" in pty_bridge

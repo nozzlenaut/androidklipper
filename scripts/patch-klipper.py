@@ -48,7 +48,17 @@ if len(sys.argv) >= 4:
 """
     if mcu_needle not in mcu_text:
         raise SystemExit("Klipper mcu PTY patch point changed; inspect upstream before updating the pin")
-    mcu_path.write_text(mcu_text.replace(mcu_needle, mcu_replacement, 1))
+    mcu_text = mcu_text.replace(mcu_needle, mcu_replacement, 1)
+
+    # Android/Chaquopy can occasionally exceed Klipper's default 25ms
+    # multi-MCU trsync window even when USB has no retransmits.
+    trsync_needle = "TRSYNC_TIMEOUT = 0.025"
+    trsync_replacement = "TRSYNC_TIMEOUT = 0.050"
+    if trsync_needle not in mcu_text:
+        raise SystemExit(
+            "Klipper trsync timeout patch point changed; inspect upstream before updating the pin")
+    mcu_path.write_text(
+        mcu_text.replace(trsync_needle, trsync_replacement, 1))
 
 
 if len(sys.argv) >= 5:
