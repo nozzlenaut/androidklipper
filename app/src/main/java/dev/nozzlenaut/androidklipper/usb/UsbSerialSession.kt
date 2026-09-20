@@ -59,6 +59,11 @@ class UsbSerialSession(
             val manager = SerialInputOutputManager(serialPort, this).apply {
                 setReadBufferSize(4096)
                 setWriteBufferSize(4096)
+                // Fire OS 8 / Android 11 is unreliable with the library's
+                // default infinite-timeout read path, which uses UsbRequest.queue().
+                // A finite timeout switches reads to UsbDeviceConnection.bulkTransfer()
+                // while still returning immediately whenever USB data arrives.
+                setReadTimeout(1000)
                 start()
             }
             ioManager = manager
