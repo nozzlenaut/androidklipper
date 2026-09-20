@@ -85,9 +85,11 @@ class UsbSerialSession(
                                     )
                                 }
                             } else if (n < 0) {
-                                // Some Fire OS builds return -1 before the timeout
-                                // expires when no packet is pending. Avoid a hot loop.
-                                Thread.sleep(5)
+                                // Fire OS can return -1 early even when the endpoint
+                                // is healthy. Keep the backoff tiny: Klipper multi-MCU
+                                // homing needs consistently low host/MCU latency, and
+                                // a 5ms sleep here can consume most of that budget.
+                                Thread.sleep(1)
                             }
                         } catch (_: InterruptedException) {
                             break

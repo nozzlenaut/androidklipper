@@ -53,6 +53,8 @@ assert "port.rts = true" not in usb_session
 assert "connection.bulkTransfer(" in usb_session
 assert "serialPort.readEndpoint" in usb_session
 assert "setReadTimeout(1000)" not in usb_session
+assert "Thread.sleep(1)" in usb_session
+assert "Thread.sleep(5)" not in usb_session
 
 pty_bridge = (root / "app/src/main/cpp/pty_bridge.cpp").read_text()
 assert "cfmakeraw" in pty_bridge
