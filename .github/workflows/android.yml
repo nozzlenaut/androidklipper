@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: android-build-${{ github.ref }}
@@ -97,3 +98,36 @@ jobs:
           name: androidklipper-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 7
+
+      # Keep only a few recent APKs so Actions storage does not quietly fill up.
+      - name: Clean old Android build artifacts
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const keep = 3;
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+                name: 'androidklipper-debug-apk'
+              }
+            );
+
+            const recent = artifacts
+              .filter((artifact) => !artifact.expired)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            core.info(`Found ${recent.length} AndroidKlipper APK artifacts; keeping ${keep}.`);
+
+            for (const artifact of recent.slice(keep)) {
+              core.info(`Deleting artifact ${artifact.id} from ${artifact.created_at}`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id
+              });
+            }
