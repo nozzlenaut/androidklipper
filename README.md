@@ -1,49 +1,80 @@
 # AndroidKlipper
 
-AndroidKlipper is an experimental open-source Klipper host for Android. The goal is simple: turn an old phone or tablet into the computer that runs a Klipper printer.
+AndroidKlipper is an experiment to answer a pretty simple question:
 
-## Target experience
+**Can an old Android phone or tablet replace the Raspberry Pi that normally runs Klipper?**
 
-1. Install APK.
-2. Plug the Android device into the printer over USB OTG.
+The goal is not to turn Android into a weird desktop Linux install. The goal is to plug the Android device directly into a printer over USB, launch the app, and have it act like the Klipper host.
+
+## What I want the setup to feel like
+
+1. Install the APK.
+2. Plug the Android device into the printer with USB OTG.
 3. Grant USB permission.
-4. Import an existing Klipper config or choose a known printer profile.
-5. Print.
+4. Load a printer config.
+5. Open Mainsail.
+6. Print.
 
-No root, Termux, Linux Deploy, or Raspberry Pi required.
+No root, Termux, Linux Deploy, or separate Raspberry Pi.
 
-## Current milestone
+## Current state
 
-The first milestone intentionally does **not** move motors or heat anything. It validates the host plumbing:
+This is still experimental. The Fire HD 8 test setup has already proven a surprising amount of the idea:
 
-- enumerate multiple USB serial MCUs
-- identify devices by USB serial number when available
-- create one PTY per MCU
-- bridge Android USB serial <-> PTY
-- verify embedded Python/pySerial can exclusively open each PTY
-- prepare a runtime-only Klipper config rewrite without changing the user's original config
+- Android can see multiple printer MCUs over USB.
+- Each MCU gets its own PTY so Klipper can talk to it like a normal Linux serial device.
+- Klipper can run inside the Android app.
+- Moonraker and a local Mainsail instance can run on the tablet.
+- Real printer controls such as fans, heaters, LEDs, and XY motion have worked in testing.
+- Full reliable homing is **not solved yet**. Z homing and USB stability are the current trouble spots.
 
-A Fire HD 8 proof-of-concept has already demonstrated Android -> USB serial bridge -> Klipper -> real MCU communication using Octo4a. This repo replaces that scaffolding with a purpose-built app.
+So, no, I would not trust this with a 30-hour print yet.
 
-## Architecture
+## Why this is harder than it sounds
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Klipper expects Linux-style serial devices. Android does USB very differently, especially on Fire OS. AndroidKlipper works around that by putting a small bridge between Android's USB API and Klipper.
 
-## Build
+Very roughly:
 
-The CI build vendors a pinned Klipper snapshot before compiling:
+```text
+Printer MCU
+    ↕ USB
+Android USB code
+    ↕
+PTY bridge
+    ↕
+Klipper
+    ↕
+Moonraker
+    ↕
+Mainsail
+```
+
+That bridge is the interesting part. It lets most of Klipper stay normal instead of rewriting Klipper around Android.
+
+For the less hand-wavy version, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Building it
+
+The build vendors a pinned Klipper snapshot before compiling:
 
 ```bash
 bash scripts/vendor-klipper.sh
 gradle :app:assembleDebug
 ```
 
-Android Studio can be used after running the vendor script once.
+Android Studio works too after the vendor script has been run once.
+
+## A note about the code
+
+This repo intentionally tries to explain the weird parts in plain English. If a section exists only because Fire OS did something stupid, the comment should say that instead of hiding it behind a wall of jargon.
+
+Vendored projects such as Mainsail and third-party libraries are left alone. Comments and documentation here are focused on the AndroidKlipper-specific code.
 
 ## Safety
 
-Early builds are host-transport tests only. Do not use them to operate heaters or motion until the full multi-MCU runtime path and watchdog behavior have been validated.
+This project can eventually control heaters and moving machinery. Early builds should be treated like development hardware, not a finished printer controller. Test with someone physically near the machine and be ready to kill power.
 
 ## License
 
-Project code is intended to be released under GPL-3.0-or-later. Bundled/upstream components retain their own licenses.
+Project code is intended to be released under GPL-3.0-or-later. Bundled and upstream components keep their own licenses.
