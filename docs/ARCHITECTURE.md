@@ -1,8 +1,10 @@
 # Architecture
 
-## Decision
+This is the less hand-wavy version of how AndroidKlipper works.
 
-The mainline design is **native Android + embedded Python**, not a user-visible Linux/proot installation.
+## The basic idea
+
+The main design is **native Android + embedded Python**. There is no user-visible Linux/proot install hiding underneath it.
 
 ```text
 Android UI / foreground service
@@ -15,42 +17,71 @@ Android UI / foreground service
         +-- one native PTY per MCU
         |       +-- /dev/pts/N exposed to embedded Python
         |
-        +-- embedded Python 3.11
+        +-- embedded Python
                 +-- Klipper (Klippy)
+                +-- Moonraker
                 +-- pySerial / greenlet / cffi / Jinja2
-                +-- prebuilt Klipper c_helper.so
+        |
+        +-- local Mainsail web server
 ```
 
-## Why PTYs
+In normal-person terms: Android owns the real USB connection. Klipper gets a fake Linux-style serial path. The bridge in the middle copies bytes in both directions so neither side needs to pretend it is something it is not.
 
-Klipper expects normal POSIX serial paths and passes the file descriptor into its native serial queue. Rewriting Klipper around Android's Java USB APIs would create a large permanent fork. A PTY keeps Android-specific code at the edge and leaves almost all Klipper code untouched.
+## Why PTYs exist
 
-Each USB MCU gets its own PTY. This fixes the single-device limitation of the Octo4a bridge used for the feasibility test.
+Klipper expects normal POSIX serial paths and eventually hands that connection to its native serial queue. Android's Java/Kotlin USB APIs do not look like that at all.
+
+We could rewrite a large chunk of Klipper around Android USB, but then AndroidKlipper would become a permanent Klipper fork that is miserable to keep updated.
+
+Instead, every USB MCU gets its own PTY. Klipper opens the PTY slave path while AndroidKlipper owns the master side and forwards bytes to and from the physical USB device.
+
+This also removes the single-device limitation of the Octo4a bridge used during the original feasibility test.
 
 ## Device identity
 
-VID/PID is not sufficient. Multiple Klipper MCUs commonly advertise the same VID/PID. AndroidKlipper reads the USB serial descriptor after permission is granted and uses that as the primary stable identifier. If a device exposes no serial descriptor, the app must fall back to a user-confirmed mapping rather than silently guessing.
+VID/PID is not enough to identify a board. A printer can have several Klipper MCUs advertising the exact same VID/PID.
+
+AndroidKlipper therefore uses the USB serial descriptor as the primary stable ID after permission is granted. On Fire OS, that serial can occasionally disappear after reopening a CDC device, so the app caches successful IDs for the current USB device path.
+
+If a device genuinely has no usable serial descriptor, the software should require an explicit mapping instead of quietly guessing which board is which. Quietly guessing is how printers become unexpectedly exciting.
 
 ## USB / PTY transport
 
-For the USB-only milestone, Android owns the physical serial device and Klipper sees a byte-transparent PTY:
+For native Klipper USB devices:
 
-- physical Klipper USB serial: opened/configured by usb-serial-for-android at 250000
-- PTY: explicitly placed in raw mode; no terminal echo, canonical processing, or CR/LF translation
-- Klipper: a tiny Android patch redirects `/dev/pts/*` from `connect_uart()` to `connect_pipe()`
+- Android opens and owns the physical USB device.
+- The PTY is put in raw mode: no echo, line editing, or CR/LF translation.
+- A small AndroidKlipper patch redirects `/dev/pts/*` from Klipper's normal UART connection path to its pipe connection path.
+- AndroidKlipper forwards raw bytes between the PTY and USB bulk endpoints.
 
-This is deliberate. The PTY is not a second hardware UART, so Klipper must not apply pySerial exclusive locks, RTS/DTR changes, baud changes, or programmer-reset sequences to it. Runtime config copies only rewrite the serial path; they do not inject a synthetic PTY baud.
+The PTY is not another hardware UART, so Klipper must not try to apply baud changes, serial exclusive locks, RTS/DTR toggles, or programmer-reset behavior to it.
 
-Before supporting USB-to-UART adapters generally, baud/control-line propagation needs a real implementation on the Android USB side.
+Fire OS has also proven that perfectly normal CDC behavior is apparently optional. The native Klipper USB path therefore uses direct bulk endpoint reads instead of relying on some of the higher-level usb-serial-for-android read paths which were unstable in testing.
+
+General USB-to-UART adapter support will need proper baud/control-line handling on the Android side. Native Klipper USB is the priority first.
 
 ## Klipper native helper
 
-Upstream Klipper normally builds `c_helper.so` with GCC at runtime. AndroidKlipper must not ship a compiler. CI builds the same C sources with the Android NDK and packages `libklipper_c_helper.so` in the APK. A tiny patch makes Klipper honor `ANDROID_KLIPPER_CHELPER` when set.
+Upstream Klipper normally builds `c_helper.so` on the host with GCC. Shipping a compiler inside an Android app would be ridiculous.
 
-## No destructive config edits
+The build instead compiles Klipper's helper with the Android NDK and packages it in the APK as `libklipper_c_helper.so`. A small patch lets Klipper use that packaged helper when `ANDROID_KLIPPER_CHELPER` is set.
 
-Imported config files are immutable source material. AndroidKlipper creates a runtime copy which changes only transport paths/baud settings required by the Android host.
+## Config handling
 
-## Later layers
+The original printer config should stay original.
 
-Moonraker and Mainsail are intentionally deferred until Klippy itself runs reliably for long prints. Their addition should not alter the USB/PTTY layer.
+AndroidKlipper imports the config into its own runtime area and rewrites only the pieces required for the Android host, mainly MCU transport paths and Android-incompatible host settings. The source config is not destructively edited.
+
+## Klipper, Moonraker, and Mainsail
+
+The project has moved past the original USB-only milestone. Current development builds can start persistent Klippy, expose its normal API socket, start Moonraker locally, and serve a bundled Mainsail interface from the Android device.
+
+That does **not** mean the printer-host stack is production-ready. USB stability and reliable full homing are still active problems on the Fire HD 8 test machine.
+
+The important design rule is that Moonraker and Mainsail sit above the USB/PTTY transport. Fixing the UI or web API should not require redesigning the physical MCU bridge.
+
+## What should stay boring
+
+The weird Android-specific code should stay concentrated around USB, PTYs, startup, and config adaptation. Upstream Klipper, Moonraker, and Mainsail should remain as close to upstream as practical.
+
+The less custom code we have to carry forever, the better.
