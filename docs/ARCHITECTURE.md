@@ -78,7 +78,7 @@ The project has moved past the original USB-only milestone. Current development 
 
 That does **not** mean the printer-host stack is production-ready. USB stability and reliable full homing are still active problems on the Fire HD 8 test machine.
 
-The important design rule is that Moonraker and Mainsail sit above the USB/PTTY transport. Fixing the UI or web API should not require redesigning the physical MCU bridge.
+The important design rule is that Moonraker and Mainsail sit above the USB/PTY transport. Fixing the UI or web API should not require redesigning the physical MCU bridge.
 
 ## What should stay boring
 
