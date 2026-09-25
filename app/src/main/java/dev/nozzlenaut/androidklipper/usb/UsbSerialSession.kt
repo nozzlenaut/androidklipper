@@ -194,9 +194,7 @@ class UsbSerialSession(
             writeRetryCount.incrementAndGet()
 
             val elapsedMs = (System.nanoTime() - failureWindowStartedAt) / 1_000_000
-            if (consecutiveFailures >= MAX_CONSECUTIVE_WRITE_FAILURES ||
-                elapsedMs >= MAX_WRITE_RETRY_WINDOW_MS
-            ) {
+            if (elapsedMs >= MAX_WRITE_RETRY_WINDOW_MS) {
                 throw IOException(
                     "USB bulk write retries exhausted for $stableId at $offset/$length " +
                         "after ${elapsedMs}ms (rc=$written, packet=$packetSize); ${stats()}"
@@ -287,7 +285,6 @@ class UsbSerialSession(
         private const val SERIAL_WRITE_TIMEOUT_MS = 2000
         private const val READ_RETRY_BACKOFF_MS = 1L
         private const val WRITE_RETRY_BACKOFF_MS = 1L
-        private const val MAX_CONSECUTIVE_WRITE_FAILURES = 12
         private const val MAX_WRITE_RETRY_WINDOW_MS = 250L
         private const val WRITE_ATTEMPT_TIMEOUT_MS = 25
         private const val IO_THREAD_JOIN_TIMEOUT_MS = 500L

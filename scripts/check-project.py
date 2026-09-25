@@ -57,7 +57,7 @@ assert "serialPort.writeEndpoint" in usb_session
 assert "setReadTimeout(1000)" not in usb_session
 assert "Thread.sleep(READ_RETRY_BACKOFF_MS)" in usb_session
 assert "Thread.sleep(WRITE_RETRY_BACKOFF_MS)" in usb_session
-assert "MAX_CONSECUTIVE_WRITE_FAILURES" in usb_session
+assert "MAX_CONSECUTIVE_WRITE_FAILURES" not in usb_session
 assert "MAX_WRITE_RETRY_WINDOW_MS" in usb_session
 assert "writeRetryCount" in usb_session
 assert "failSession(" in usb_session
