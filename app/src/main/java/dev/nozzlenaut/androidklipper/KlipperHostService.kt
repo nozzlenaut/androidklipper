@@ -69,10 +69,9 @@ class KlipperHostService : Service() {
             runCatching { python.getModule("persistent_host").callAttr("stop") }
         }
 
-        // Always tear down old USB sessions before trying to reopen them. Android
-        // USB stacks can return an apparently valid connection immediately after
-        // close while the kernel is still releasing the claimed CDC interfaces.
-        // A short post-close settle proved more reliable than sleeping before close.
+        // Close first, then give Android a moment to release the CDC interfaces.
+        // Sleeping before close does not help a kernel/USB stack that is still
+        // unwinding the old claims after UsbDeviceConnection.close().
         val hadSessions = sessions.isNotEmpty()
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
@@ -366,8 +365,8 @@ class KlipperHostService : Service() {
     }
 
     private fun createNotificationChannel() {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "Klipper host", NotificationManager.IMPORTANCE_LOW)
             )
