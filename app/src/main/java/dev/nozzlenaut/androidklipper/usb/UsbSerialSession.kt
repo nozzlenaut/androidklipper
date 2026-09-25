@@ -105,16 +105,16 @@ class UsbSerialSession(
                             }
                         }
                         n < 0 -> {
-                            // Android collapses both timeout-ish conditions and real
-                            // USB errors to -1 here. One -1 must not kill Klipper.
+                            // Android reports both an idle timeout and a real USB
+                            // failure as -1. Do not probe the connection with an
+                            // extra control transfer here; some Android USB stacks
+                            // become less stable when bulk and EP0 traffic overlap.
                             consecutiveFailures++
                             readRetryCount.incrementAndGet()
-                            if (consecutiveFailures >= MAX_CONSECUTIVE_READ_FAILURES &&
-                                !usbDeviceStillPresent()
-                            ) {
-                                throw IOException(
-                                    "USB device disappeared during read for $stableId; ${stats()}"
-                                )
+                            if (consecutiveFailures >= MAX_CONSECUTIVE_READ_FAILURES) {
+                                // A read timeout by itself is not fatal. Reset the
+                                // counter periodically so an idle MCU can stay open.
+                                consecutiveFailures = 0
                             }
                             Thread.sleep(READ_RETRY_BACKOFF_MS)
                         }
@@ -173,11 +173,7 @@ class UsbSerialSession(
 
         while (offset < length && running.get()) {
             val chunkLength = minOf(length - offset, packetSize)
-            val chunk = if (offset == 0 && chunkLength == length) {
-                source.copyOf(length)
-            } else {
-                source.copyOfRange(offset, offset + chunkLength)
-            }
+            val chunk = source.copyOfRange(offset, offset + chunkLength)
 
             val written = connection.bulkTransfer(
                 endpoint,
@@ -193,16 +189,12 @@ class UsbSerialSession(
                 continue
             }
 
-            // Android's Java USB API only gives us -1 here. A single immediate
-            // failure is not proof of disconnect; retry the exact unsent chunk.
+            // Android's Java USB API only gives us -1 here. One immediate failure
+            // is not proof that the MCU disappeared, so retry the exact unsent
+            // bytes. A genuinely disconnected device will exhaust this small,
+            // bounded retry window and then fail cleanly.
             consecutiveFailures++
             writeRetryCount.incrementAndGet()
-
-            if (!usbDeviceStillPresent()) {
-                throw IOException(
-                    "USB device disappeared while writing $stableId at $offset/$length; ${stats()}"
-                )
-            }
 
             val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
             if (consecutiveFailures >= MAX_CONSECUTIVE_WRITE_FAILURES ||
@@ -222,15 +214,6 @@ class UsbSerialSession(
                 "USB bulk write incomplete for $stableId: wrote $offset of $length bytes; ${stats()}"
             )
         }
-    }
-
-    private fun usbDeviceStillPresent(): Boolean {
-        val device = driver.device
-        return runCatching {
-            // The descriptor call forces Android to touch the live connection.
-            // A cached UsbDevice object alone is not enough to prove attachment.
-            connection.rawDescriptors?.isNotEmpty() == true && device.deviceName.isNotBlank()
-        }.getOrDefault(false)
     }
 
     private fun isKlipperNativeUsb(): Boolean {
