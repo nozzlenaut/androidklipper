@@ -3,6 +3,7 @@ package dev.nozzlenaut.androidklipper
 import android.app.Activity
 import android.os.Bundle
 import android.view.View
+import android.view.WindowManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -12,6 +13,9 @@ class MainsailActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The G2 suspends USB host traffic when the display actually sleeps.
+        // Keep the kiosk awake; brightness can still be set very low by the user.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or

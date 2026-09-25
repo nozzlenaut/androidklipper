@@ -224,6 +224,7 @@ assert "Os.symlink" in host_service
 mainsail_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainsailActivity.kt").read_text()
 assert 'loadUrl("http://127.0.0.1:8080/")' in mainsail_activity
 assert "setLayerType(View.LAYER_TYPE_HARDWARE" in mainsail_activity
+assert "FLAG_KEEP_SCREEN_ON" in mainsail_activity
 
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch
