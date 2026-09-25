@@ -25,6 +25,7 @@ assert "foregroundServiceType=\"connectedDevice\"" in manifest
 assert "android.hardware.usb.action.USB_DEVICE_ATTACHED" in manifest
 assert "@xml/device_filter" in manifest
 assert 'android:launchMode="singleTop"' in manifest
+assert 'android.permission.WAKE_LOCK' in manifest
 
 device_filter = (root / "app/src/main/res/xml/device_filter.xml").read_text()
 assert 'vendor-id="7504"' in device_filter
@@ -114,6 +115,10 @@ assert "KEY_AUTO_KIOSK_PENDING" in host_service
 assert "toString().also" in host_service
 assert "sessions.forEach { runCatching { it.close() } }" in host_service
 assert "Thread.sleep(USB_REOPEN_SETTLE_MS)" in host_service
+assert "PowerManager.PARTIAL_WAKE_LOCK" in host_service
+assert "acquireHostWakeLock()" in host_service
+assert "releaseHostWakeLock()" in host_service
+assert "if (!realConfig) releaseHostWakeLock()" in host_service
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "def probe_pipe_open(path):" in hostprobe

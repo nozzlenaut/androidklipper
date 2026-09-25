@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Environment
 import android.system.Os
 import android.os.IBinder
+import android.os.PowerManager
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
@@ -37,6 +38,7 @@ class KlipperHostService : Service() {
     }
     private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
     private val mainsailServer by lazy { MainsailServer(this) }
+    private var hostWakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -54,6 +56,9 @@ class KlipperHostService : Service() {
             else -> "Starting USB host test…"
         }
         startForeground(NOTIFICATION_ID, notification(startText))
+        // Real host mode must keep running like an SBC even if Android blanks the display.
+        // Acquire before USB identify so auto-start is protected even with the screen off.
+        if (realConfig) acquireHostWakeLock()
         // USB permission callbacks can arrive close together for multi-MCU printers.
         // Serialize rebuilds so two service starts never fight over the same device.
         hostExecutor.execute { rebuildSessions(fullSmoke, realConfig) }
@@ -76,6 +81,7 @@ class KlipperHostService : Service() {
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
         if (hadSessions) Thread.sleep(USB_REOPEN_SETTLE_MS)
+        if (!realConfig) releaseHostWakeLock()
 
         val storageSummary = prepareGcodeStorage()
 
@@ -168,6 +174,7 @@ class KlipperHostService : Service() {
 
         if (realConfig) {
             if (!allIdentified || stablePtyMap.size != supported.size) {
+                releaseHostWakeLock()
                 statusLines += "Persistent host SKIPPED: every supported USB device must identify as a Klipper MCU first."
             } else {
                 val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
@@ -204,6 +211,7 @@ class KlipperHostService : Service() {
                 }
 
                 if (!klippySocketReady) {
+                    releaseHostWakeLock()
                     statusLines += "Persistent Klippy ERROR: API socket did not appear."
                 } else {
                     statusLines += "Persistent Klippy API: ${klippySocket.absolutePath}"
@@ -339,6 +347,25 @@ class KlipperHostService : Service() {
         }
     }
 
+    private fun acquireHostWakeLock() {
+        if (hostWakeLock?.isHeld == true) return
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        hostWakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "$packageName:KlipperHost"
+        ).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseHostWakeLock() {
+        hostWakeLock?.let { lock ->
+            if (lock.isHeld) runCatching { lock.release() }
+        }
+        hostWakeLock = null
+    }
+
     private fun publishStatus(text: String) {
         HostStatusStore.save(this, text)
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
@@ -386,6 +413,7 @@ class KlipperHostService : Service() {
         klippyExecutor.shutdownNow()
         statusServer.close()
         runCatching { mainsailServer.stop() }
+        releaseHostWakeLock()
         super.onDestroy()
     }
 
