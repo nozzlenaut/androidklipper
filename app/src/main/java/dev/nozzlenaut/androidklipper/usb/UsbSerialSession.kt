@@ -84,7 +84,6 @@ class UsbSerialSession(
         usbReader = Thread({
             setUrgentIoPriority()
             val buffer = ByteArray(BUFFER_SIZE)
-            var consecutiveFailures = 0
             while (running.get()) {
                 try {
                     val n = connection.bulkTransfer(
@@ -95,7 +94,6 @@ class UsbSerialSession(
                     )
                     when {
                         n > 0 -> {
-                            consecutiveFailures = 0
                             rxBytes.addAndGet(n.toLong())
                             val written = pty.write(buffer.copyOf(n))
                             if (written != n) {
@@ -106,16 +104,11 @@ class UsbSerialSession(
                         }
                         n < 0 -> {
                             // Android reports both an idle timeout and a real USB
-                            // failure as -1. Do not probe the connection with an
-                            // extra control transfer here; some Android USB stacks
-                            // become less stable when bulk and EP0 traffic overlap.
-                            consecutiveFailures++
+                            // failure as -1. A read-side -1 by itself is therefore
+                            // not enough evidence to tear down a healthy Klipper
+                            // session. The write path has a bounded retry window and
+                            // Klipper itself detects a genuinely silent MCU.
                             readRetryCount.incrementAndGet()
-                            if (consecutiveFailures >= MAX_CONSECUTIVE_READ_FAILURES) {
-                                // A read timeout by itself is not fatal. Reset the
-                                // counter periodically so an idle MCU can stay open.
-                                consecutiveFailures = 0
-                            }
                             Thread.sleep(READ_RETRY_BACKOFF_MS)
                         }
                     }
@@ -271,7 +264,6 @@ class UsbSerialSession(
         private const val SERIAL_WRITE_TIMEOUT_MS = 2000
         private const val READ_RETRY_BACKOFF_MS = 1L
         private const val WRITE_RETRY_BACKOFF_MS = 1L
-        private const val MAX_CONSECUTIVE_READ_FAILURES = 20
         private const val MAX_CONSECUTIVE_WRITE_FAILURES = 12
         private const val MAX_WRITE_RETRY_WINDOW_MS = 250L
         private const val WRITE_ATTEMPT_TIMEOUT_MS = 25
