@@ -52,8 +52,15 @@ assert "port.dtr = true" not in usb_session
 assert "port.rts = true" not in usb_session
 assert "connection.bulkTransfer(" in usb_session
 assert "serialPort.readEndpoint" in usb_session
+assert "serialPort.writeEndpoint" in usb_session
 assert "setReadTimeout(1000)" not in usb_session
-assert "Thread.sleep(1)" in usb_session
+assert "Thread.sleep(READ_RETRY_BACKOFF_MS)" in usb_session
+assert "Thread.sleep(WRITE_RETRY_BACKOFF_MS)" in usb_session
+assert "MAX_CONSECUTIVE_WRITE_FAILURES" in usb_session
+assert "MAX_WRITE_RETRY_WINDOW_MS" in usb_session
+assert "writeRetryCount" in usb_session
+assert "failSession(" in usb_session
+assert "thread.join(IO_THREAD_JOIN_TIMEOUT_MS)" in usb_session
 assert "Thread.sleep(5)" not in usb_session
 
 klipper_patch = (root / "scripts/patch-klipper.py").read_text()
@@ -105,6 +112,8 @@ assert "Only arm a PTY for full/real Klippy after the MCU has" in host_service
 assert "KEY_AUTO_START_USB" in host_service
 assert "KEY_AUTO_KIOSK_PENDING" in host_service
 assert "toString().also" in host_service
+assert "sessions.forEach { runCatching { it.close() } }" in host_service
+assert "Thread.sleep(USB_REOPEN_SETTLE_MS)" in host_service
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "def probe_pipe_open(path):" in hostprobe
