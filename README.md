@@ -1,80 +1,74 @@
 # AndroidKlipper
 
-AndroidKlipper is an experiment to answer a pretty simple question:
+AndroidKlipper is an experiment in turning an ordinary Android device into a real Klipper host.
 
-**Can an old Android phone or tablet replace the Raspberry Pi that normally runs Klipper?**
+The goal is not "Mainsail in a WebView." The goal is to replace the Raspberry Pi-shaped part of a printer setup with hardware people already own or can buy cheaply: an old tablet, handheld, prepaid phone, or similar Android device.
 
-The goal is not to turn Android into a weird desktop Linux install. The goal is to plug the Android device directly into a printer over USB, launch the app, and have it act like the Klipper host.
+## What works now
 
-## What I want the setup to feel like
+The current development build runs the real stack on Android:
 
-1. Install the APK.
-2. Plug the Android device into the printer with USB OTG.
-3. Grant USB permission.
-4. Load a printer config.
-5. Open Mainsail.
-6. Print.
+- direct USB communication with native Klipper MCUs
+- one Android PTY per MCU so upstream Klipper can use normal serial-style paths
+- embedded Klipper
+- embedded Moonraker
+- bundled Mainsail
+- local G-code storage, including removable storage when available
+- automatic USB permission/startup flow
+- optional auto-start of the real host and Mainsail kiosk
+- LAN access to Mainsail and Moonraker
+- foreground-service wake lock
+- Mainsail kiosk keeps the display awake on devices that suspend USB when the screen sleeps
 
-No root, Termux, Linux Deploy, or separate Raspberry Pi.
+The USB transport deliberately lives at the Android edge. Klipper itself should stay as close to upstream as possible.
 
-## Current state
+## Current hardware checkpoint — 2026-09-25
 
-This is still experimental. The Fire HD 8 test setup has already proven a surprising amount of the idea:
+Primary test device: Retroid Pocket G2, Android 15.
 
-- Android can see multiple printer MCUs over USB.
-- Each MCU gets its own PTY so Klipper can talk to it like a normal Linux serial device.
-- Klipper can run inside the Android app.
-- Moonraker and a local Mainsail instance can run on the tablet.
-- Real printer controls such as fans, heaters, LEDs, and XY motion have worked in testing.
-- Full reliable homing is **not solved yet**. Z homing and USB stability are the current trouble spots.
+Printer: Voron 2.4 350 with three native Klipper USB MCUs:
 
-So, no, I would not trust this with a 30-hour print yet.
+- STM32F446 mainboard
+- RP2040 NHK/toolhead board
+- RP2040 Eddy/probe board
 
-## Why this is harder than it sounds
+Build v249 successfully completed three full homes and a Quad Gantry Level with zero retransmitted or invalid bytes during the active test. Mainsail also stayed available past the device's normal one-minute screen timeout because the kiosk now keeps the display awake.
 
-Klipper expects Linux-style serial devices. Android does USB very differently, especially on Fire OS. AndroidKlipper works around that by putting a small bridge between Android's USB API and Klipper.
+There is still an unresolved idle USB-host failure: roughly eleven minutes into that same session, all three MCU links fell behind and Klipper shut down. The active homing/QGL workload was clean; the later failure looked like a shared Android/USB-host or hub/power-path interruption rather than one MCU failing under motion load.
 
-Very roughly:
+So: **real printer control works, but long-duration stability is not yet print-proven.**
 
-```text
-Printer MCU
-    ↕ USB
-Android USB code
-    ↕
-PTY bridge
-    ↕
-Klipper
-    ↕
-Moonraker
-    ↕
-Mainsail
-```
+See `docs/CHECKPOINT.md` for the detailed checkpoint and `docs/COMPATIBILITY.md` for device-portability notes.
 
-That bridge is the interesting part. It lets most of Klipper stay normal instead of rewriting Klipper around Android.
+## Architecture in one paragraph
 
-For the less hand-wavy version, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Android owns each physical USB device. AndroidKlipper forwards the raw Klipper byte stream through a native PTY. Embedded Klipper opens that PTY, Moonraker connects to Klipper's normal Unix socket, and Mainsail talks to Moonraker. The dynamic PTY number can change on every boot; the USB MCU's stable serial ID is what matters.
 
-## Building it
+## Important current limitations
 
-The build vendors a pinned Klipper snapshot before compiling:
+- The working printer profile still expects Dalton's three known MCU serial IDs. That is a safety rail, not the final generic design.
+- Real-host startup still imports the source printer config from a configured Moonraker URL. A standalone cached-config boot path is still needed before this can honestly replace the old host with nothing else running.
+- Screen-off can suspend USB host traffic on some Android devices. The G2 currently works around that by keeping Mainsail's display technically awake.
+- USB detach/reconnect recovery is not automatic yet.
+- OTG + charging behavior varies wildly by device and hub/cable.
+- A successful real print and longer soak test are still pending.
 
-```bash
-bash scripts/vendor-klipper.sh
-gradle :app:assembleDebug
-```
+## Next milestones
 
-Android Studio works too after the vendor script has been run once.
+1. Reproduce and isolate the remaining idle USB-host dropout.
+2. Complete a real print without USB loss.
+3. Test the same printer on the G2, Fire HD 8, ROG Ally/Android test environment, and a cheap mainstream phone such as a Moto G.
+4. Cache the raw printer config locally so AndroidKlipper can boot without the old Moonraker source.
+5. Replace the hard-coded three-MCU fixture with a saved printer profile.
+6. Add clean USB detach/reconnect recovery and better power diagnostics.
+7. Add camera support: built-in Android camera, USB webcam, and Mainsail/Moonraker viewing from another device.
 
-## A note about the code
+## Project rules
 
-This repo intentionally tries to explain the weird parts in plain English. If a section exists only because Fire OS did something stupid, the comment should say that instead of hiding it behind a wall of jargon.
+- Do not silently modify the user's source printer config.
+- Prefer small Android compatibility patches over a permanent Klipper/Moonraker fork.
+- Stable USB identity matters more than `/dev/pts/N` numbering.
+- Make failures loud and diagnosable instead of hiding them.
+- Keep the host useful without subscriptions or proprietary lock-in.
 
-Vendored projects such as Mainsail and third-party libraries are left alone. Comments and documentation here are focused on the AndroidKlipper-specific code.
-
-## Safety
-
-This project can eventually control heaters and moving machinery. Early builds should be treated like development hardware, not a finished printer controller. Test with someone physically near the machine and be ready to kill power.
-
-## License
-
-Project code is intended to be released under GPL-3.0-or-later. Bundled and upstream components keep their own licenses.
+The code tour in `docs/CODE_TOUR.md` is the easiest place to start if you're trying to understand the repo.

@@ -1,102 +1,108 @@
-# Roadmap
+# AndroidKlipper roadmap
 
-## M0 - feasibility (done outside this repo)
+This roadmap tracks real printer-host capability, not UI polish for its own sake.
 
-Fire HD 8 -> Android USB host -> serial bridge -> Klipper -> real MCU configured successfully.
+## M0 — feasibility
 
-## M1 - native host transport (current)
+- [x] prove Android can USB-host Klipper MCU hardware
+- [x] prove Python/Klipper dependencies can live inside the APK
+- [x] prove local Mainsail is practical
 
-- [x] Android project scaffold
-- [x] USB serial enumeration
-- [x] explicit Klipper CDC VID/PID probe
-- [x] multiple PTY bridge architecture
+## M1 — native Android transport
+
+- [x] enumerate supported USB devices
+- [x] chained Android USB permission flow
+- [x] native PTY bridge
+- [x] stable USB identity -> dynamic PTY mapping
+- [x] raw native-Klipper bulk read/write path
+- [x] bounded write retry window with useful diagnostics
+- [x] robust session teardown / USB reopen settle
+- [x] no DTR/RTS reset surprises
+- [x] project/static invariants in CI
+
+Still needed:
+
+- [ ] automatic USB detach/reconnect recovery
+- [ ] longer idle/print soak testing
+- [ ] decide whether per-packet allocation in the bulk writer is worth optimizing after a stable print baseline exists
+
+## M2 — real Klipper host
+
+- [x] embedded upstream-style Klipper runtime
+- [x] packaged c_helper/native pieces
+- [x] multi-MCU real config startup
+- [x] runtime-only config sanitizing
+- [x] persistent Klippy API socket
+- [x] normal Klipper restart loop
+- [x] successful real homing
+- [x] successful Quad Gantry Level with Eddy
+
+Current limitation:
+
+- [ ] complete a real print
+- [ ] survive long idle sessions without a shared USB-host dropout
+
+## M3 — Moonraker + Mainsail appliance
+
+- [x] embedded Moonraker
+- [x] bundled local Mainsail
 - [x] foreground connected-device service
-- [x] embedded Python/pySerial probe
-- [x] NDK build definition for Klipper c_helper
-- [x] runtime-only config rewriter + unit test
-- [x] CI produces installable APK
-- [x] Fire HD 8: 3 USB MCUs visible simultaneously
-- [x] Fire HD 8: stable USB serial IDs confirmed in native-app report
-- [x] Fire HD 8: 3 PTYs created simultaneously
-- [x] Fire HD 8: Klipper opens all PTYs as raw byte pipes (pySerial intentionally bypassed for Android PTYs)
-- [x] Fire HD 8: prebuilt c_helper loads through cffi
+- [x] auto-start real host from printer USB attach
+- [x] optional auto-open Mainsail kiosk
+- [x] removable-storage G-code directory
+- [x] file-upload compatibility plumbing
+- [x] LAN-accessible Moonraker and Mainsail
+- [x] partial CPU wake lock
+- [x] keep Mainsail display logically awake on devices that suspend USB with screen-off
 
-## M2 - run real Klippy inside the app
+Still needed:
 
-- [x] start/stop diagnostic Klippy under service lifecycle
-- [x] connect harmless `kinematics: none` config to physical MCUs
-- [x] connect all three USB MCUs using runtime PTY mapping
-- [x] full no-pin Klippy reaches Ready on all three MCUs (build 117)
-- [x] import active Voron config and reach the real-config Ready callback path (build 136)
-- [x] patch Android-missing `os.getloadavg()` crash in Klipper statistics (build 141; hardware re-test pending)
-- [x] require successful MCU identify before a PTY can enter full/real Klippy
-- [x] diagnostic service is non-sticky to prevent ambiguous Android restarts
-- [ ] clean recovery after USB detach/reconnect
-- [ ] persistent production Klippy lifecycle (do not exit at Ready)
-- [ ] 8/24/48-hour idle soak tests
+- [ ] show/copy/share the current LAN Mainsail address in the app
+- [ ] optional very-dim/black kiosk mode without allowing real display sleep
+- [ ] graceful host recovery UI after USB loss
+- [ ] reboot/autostart behavior suitable for a dedicated appliance
 
-## M3 - useful printer host
+## M4 — make it standalone and portable
 
-- [x] import a full printer config tree from the existing Moonraker host (diagnostic migration path)
-- [ ] persist/manage imported config locally without requiring the old host
-- [ ] Moonraker
-- [ ] bundled Mainsail
-- [ ] local web UI
-- [ ] printer files / G-code upload
-- [ ] reboot autostart option
-- [ ] safe power/battery warnings
+Today, the working development fixture still expects Dalton's exact three MCU IDs and imports the printer config from a configured Moonraker source.
 
-## M4 - phone/tablet features
+- [ ] import and retain an untouched raw local config copy
+- [ ] re-sanitize that raw copy against the PTYs created on each boot
+- [ ] boot with no old Pi/NUC/Moonraker source present
+- [ ] saved printer profile with expected MCU IDs/count
+- [ ] one-time mapping flow for devices without unique USB serials
+- [ ] remove magic "3 MCU" assumptions from generic startup UI
+- [ ] separate generic project invariants from the current Voron development fixture
 
-- [ ] built-in camera stream
+## M5 — device portability
+
+- [x] Retroid Pocket G2: real host, homing, QGL
+- [ ] Retroid Pocket G2: successful print + long soak
+- [ ] Fire HD 8 retest on current transport
+- [ ] ROG Ally / alternate Android hardware test
+- [ ] cheap mainstream phone test, preferably Moto G-class hardware
+- [ ] document known-good hubs, OTG adapters, and powered cables
+- [ ] charging/power-loss diagnostics
+- [ ] low-battery warning before printing
+
+## M6 — cameras
+
+Start this after the first convincing print/stability result.
+
+- [ ] built-in Android camera live stream
+- [ ] USB UVC webcam live stream
+- [ ] register camera cleanly with Moonraker/Mainsail
+- [ ] verify remote Mainsail + camera from another LAN device
 - [ ] timelapse
-- [ ] notifications
-- [ ] local backups
-- [ ] optional failure detection
 
-## M5 - hardware / ecosystem
+Remote Mainsail itself already works; camera support is the missing piece.
 
-- [ ] tested powered OTG adapters
-- [ ] USB power-isolation/backfeed testing
-- [ ] universal phone/tablet mount
-- [ ] optional hardware kit
-- [ ] donation links / sponsors
+## M7 — polish without turning it into nonsense
 
+- [ ] simple first-run printer setup
+- [ ] readable health page: host, MCUs, power, storage, network
+- [ ] exportable diagnostics bundle
+- [ ] safe update path
+- [ ] optional tested hardware kit for power/OTG/cabling
 
-## Verified hardware milestone
-- [x] Fire HD 8: all three printer MCUs complete Klipper identify through Android USB -> native bridge -> raw PTY -> embedded Klipper
-  - rp2040: `3033393834057C77` (139 commands)
-  - stm32f446xx: `3F001E001450535556323420` (151 commands)
-  - rp2040: `504450610844C31C` (139 commands)
-  - verified on build 108 after printer power-cycle
-
-- [x] Fire HD 8: full Klippy runtime reaches `Printer is ready` with all three physical printer MCUs through Android USB/PTYS
-  - build 117
-  - test config: `kinematics: none`, no configured pins
-  - stm32f446xx: `3F001E001450535556323420`
-  - rp2040: `3033393834057C77`
-  - rp2040: `504450610844C31C`
-  - dynamic Klipper packages `extras` and `kinematics` verified under Chaquopy
-
-
-## Current Android compatibility notes
-
-- Klipper statistics used `os.getloadavg()`, which Chaquopy Python on Android does not expose. AndroidKlipper patches this to read `/proc/loadavg` when available and otherwise report zero.
-- The current real-config diagnostic exits at Ready; it is not yet the persistent production host.
-- Resonance calibration is a later compatibility item: Klipper lazily requires NumPy for shaper analysis, uses multiprocessing for some calculations/writes, and uses Linux-style `/tmp` output paths. These do not block normal printer startup and are intentionally not bundled into the current startup-test build.
-- USB detach/reconnect handling still needs a dedicated production lifecycle path before long-running printer use.
-
-
-## Verified real-config milestone
-- [x] Fire HD 8: full active Voron config reaches `REAL VORON CONFIG READY` against all three physical MCUs on Android
-  - build 150
-  - stm32f446xx: `3F001E001450535556323420`
-  - Nitehawk rp2040: `3033393834057C77`
-  - Eddy rp2040: `504450610844C31C`
-  - active config imported from the old Moonraker host
-  - Android runtime rewrites stable MCU IDs to dynamic PTYs
-  - host-only K-ShakeTune include skipped
-  - NUC temperature sensor stripped
-  - `restart_method` stripped for PTY transports
-  - Android `os.getloadavg()` incompatibility patched in the runtime Klipper statistics module
-  - reached Ready with no unexpected motion or heating; LEDs configured normally; no shutdown/failsafe fan observed
+Keep the local host free/open. Hardware earns its keep by being tested and convenient, not by locking the printer to proprietary electronics.
