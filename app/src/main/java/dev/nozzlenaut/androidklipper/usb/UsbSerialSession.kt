@@ -161,8 +161,8 @@ class UsbSerialSession(
     private fun writeKlipperBulk(endpoint: UsbEndpoint, source: ByteArray, length: Int) {
         var offset = 0
         var consecutiveFailures = 0
+        var failureWindowStartedAt = 0L
         val packetSize = endpoint.maxPacketSize.coerceAtLeast(1)
-        val startedAt = System.nanoTime()
 
         while (offset < length && running.get()) {
             val chunkLength = minOf(length - offset, packetSize)
@@ -179,6 +179,7 @@ class UsbSerialSession(
                 offset += written
                 txBytes.addAndGet(written.toLong())
                 consecutiveFailures = 0
+                failureWindowStartedAt = 0L
                 continue
             }
 
@@ -186,10 +187,13 @@ class UsbSerialSession(
             // is not proof that the MCU disappeared, so retry the exact unsent
             // bytes. A genuinely disconnected device will exhaust this small,
             // bounded retry window and then fail cleanly.
+            if (consecutiveFailures == 0) {
+                failureWindowStartedAt = System.nanoTime()
+            }
             consecutiveFailures++
             writeRetryCount.incrementAndGet()
 
-            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+            val elapsedMs = (System.nanoTime() - failureWindowStartedAt) / 1_000_000
             if (consecutiveFailures >= MAX_CONSECUTIVE_WRITE_FAILURES ||
                 elapsedMs >= MAX_WRITE_RETRY_WINDOW_MS
             ) {
