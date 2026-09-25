@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 concurrency:
@@ -129,6 +129,17 @@ jobs:
       - name: Inspect packaged APK
         run: bash scripts/inspect-apk.sh
 
+      - name: Publish manual test APK as release asset
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="g2-usb-fix-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            "app/build/outputs/apk/debug/app-debug.apk#androidklipper-g2-usb-fix.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "AndroidKlipper USB fix ${GITHUB_RUN_NUMBER}" \
+            --notes "Temporary reviewed USB transport test build."
       - uses: actions/upload-artifact@v4
         with:
           name: androidklipper-debug-apk
