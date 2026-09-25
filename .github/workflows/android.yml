@@ -6,7 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:`n  contents: write`n  actions: write
+permissions:
+  contents: write
+  actions: write
 
 concurrency:
   group: android-build-${{ github.ref }}
