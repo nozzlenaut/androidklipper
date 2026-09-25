@@ -67,10 +67,16 @@ class KlipperHostService : Service() {
             val python = Python.getInstance()
             runCatching { python.getModule("moonraker_runner").callAttr("stop") }
             runCatching { python.getModule("persistent_host").callAttr("stop") }
-            Thread.sleep(150)
         }
+
+        // Always tear down old USB sessions before trying to reopen them. Android
+        // USB stacks can return an apparently valid connection immediately after
+        // close while the kernel is still releasing the claimed CDC interfaces.
+        // A short post-close settle proved more reliable than sleeping before close.
+        val hadSessions = sessions.isNotEmpty()
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
+        if (hadSessions) Thread.sleep(USB_REOPEN_SETTLE_MS)
 
         val storageSummary = prepareGcodeStorage()
 
@@ -360,8 +366,8 @@ class KlipperHostService : Service() {
     }
 
     private fun createNotificationChannel() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "Klipper host", NotificationManager.IMPORTANCE_LOW)
             )
@@ -398,6 +404,7 @@ class KlipperHostService : Service() {
         private const val CONFIG_SOURCE_URL = "http://192.168.1.83:7125"
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
+        private const val USB_REOPEN_SETTLE_MS = 250L
 
         fun start(
             context: Context,
