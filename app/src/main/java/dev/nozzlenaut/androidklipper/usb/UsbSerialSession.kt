@@ -115,7 +115,7 @@ class UsbSerialSession(
                 } catch (_: InterruptedException) {
                     break
                 } catch (t: Throwable) {
-                    if (running.get()) onError(withStats("USB read failed", t))
+                    failSession("USB read failed", t)
                     break
                 }
             }
@@ -133,7 +133,7 @@ class UsbSerialSession(
                 } catch (_: InterruptedException) {
                     break
                 } catch (t: Throwable) {
-                    if (running.get()) onError(withStats("USB write failed", t))
+                    failSession("USB write failed", t)
                     break
                 }
             }
@@ -151,7 +151,7 @@ class UsbSerialSession(
                 } catch (_: InterruptedException) {
                     break
                 } catch (t: Throwable) {
-                    if (running.get()) onError(withStats("Serial write failed", t))
+                    failSession("Serial write failed", t)
                     break
                 }
             }
@@ -209,6 +209,13 @@ class UsbSerialSession(
         }
     }
 
+    private fun failSession(prefix: String, cause: Throwable) {
+        if (!running.compareAndSet(true, false)) return
+        onError(withStats(prefix, cause))
+        usbReader?.let { if (it !== Thread.currentThread()) it.interrupt() }
+        ptyReader?.let { if (it !== Thread.currentThread()) it.interrupt() }
+    }
+
     private fun isKlipperNativeUsb(): Boolean {
         val device = driver.device
         return device.vendorId == UsbDeviceScanner.KLIPPER_VID &&
@@ -233,28 +240,40 @@ class UsbSerialSession(
                 throw IOException("PTY write incomplete: wrote $written of ${data.size} bytes")
             }
         } catch (t: Throwable) {
-            if (running.get()) onError(withStats("PTY write failed", t))
+            failSession("PTY write failed", t)
         }
     }
 
     override fun onRunError(e: Exception) {
-        if (running.get()) onError(withStats("Serial I/O manager failed", e))
+        failSession("Serial I/O manager failed", e)
     }
 
     override fun close() {
         running.set(false)
         runCatching { ioManager?.stop() }
         ioManager = null
-        usbReader?.interrupt()
-        ptyReader?.interrupt()
-        usbReader = null
-        ptyReader = null
+
+        val oldUsbReader = usbReader
+        val oldPtyReader = ptyReader
+        oldUsbReader?.interrupt()
+        oldPtyReader?.interrupt()
+
+        // Closing the port releases both CDC interfaces and closes the underlying
+        // UsbDeviceConnection. Do this before join so a blocked bulkTransfer wakes.
         runCatching { port?.close() }
         port = null
-        runCatching { pty.close() }
-        // port.close() closes the same UsbDeviceConnection in the library,
-        // but close again is harmless and keeps ownership explicit here.
         runCatching { connection.close() }
+        runCatching { pty.close() }
+
+        joinIoThread(oldUsbReader)
+        joinIoThread(oldPtyReader)
+        usbReader = null
+        ptyReader = null
+    }
+
+    private fun joinIoThread(thread: Thread?) {
+        if (thread == null || thread === Thread.currentThread()) return
+        runCatching { thread.join(IO_THREAD_JOIN_TIMEOUT_MS) }
     }
 
     companion object {
@@ -267,5 +286,6 @@ class UsbSerialSession(
         private const val MAX_CONSECUTIVE_WRITE_FAILURES = 12
         private const val MAX_WRITE_RETRY_WINDOW_MS = 250L
         private const val WRITE_ATTEMPT_TIMEOUT_MS = 25
+        private const val IO_THREAD_JOIN_TIMEOUT_MS = 500L
     }
 }
