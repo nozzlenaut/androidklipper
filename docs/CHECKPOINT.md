@@ -1,12 +1,12 @@
 # AndroidKlipper checkpoint
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
-This file is the current "where are we actually at?" checkpoint. It should describe observed hardware behavior, not the version we wish we had.
+This file is the current "where are we actually at?" checkpoint. It describes observed hardware behavior, not the version we wish we had.
 
-## Working stack
+## Current working stack
 
-Current test build: v249.
+Current test build: v252 (`host-persistence-252`).
 
 Current primary device: Retroid Pocket G2, Android 15.
 
@@ -19,11 +19,13 @@ The app currently runs:
 - bundled Mainsail
 - removable-storage G-code directory when available
 - automatic real-host startup and kiosk flow
-- partial CPU wake lock while the real host is active
-- `FLAG_KEEP_SCREEN_ON` while the Mainsail kiosk is open
+- foreground connected-device service + partial CPU wake lock
+- sticky persistent-host intent for Android service recreation
+- duplicate-start guard so USB callbacks cannot rebuild a live host
+- persistent Android-side host flight recorder
 - LAN-facing Mainsail and Moonraker
 
-Remote Mainsail was verified from another machine on the same LAN. The missing remote-printer feature is camera streaming, not basic web access.
+Remote Mainsail is verified. Camera streaming remains a separate future feature.
 
 ## Printer fixture
 
@@ -33,67 +35,82 @@ Voron 2.4 350 with three native Klipper USB MCUs:
 - RP2040 NHK/toolhead — `3033393834057C77`
 - RP2040 Eddy/probe — `504450610844C31C`
 
-These IDs are currently hard-coded as a deliberate bring-up safety rail. They are not meant to be the final generic-printer model.
+These exact IDs are still bring-up safety rails, not the final generic-printer model.
 
-## Successful v249 test
+## v252 long-print result — PASS
 
-Session started around 18:48:29 EDT and Klippy reached ready around 18:48:32.
+Stable host PID 13586 came up at 14:47:08 EDT. The Benchy print command was sent at 14:51:31 and Moonraker recorded completion at 16:13:30.
 
-The user then completed, manually from Mainsail:
+Result:
 
-- three full homes
-- Quad Gantry Level
-- additional X/Y homing/movement
+- `3DBenchy.gcode` completed
+- print duration: 4653.686 s (1:17:33.7)
+- total job duration: 4935.223 s (1:22:15.2)
+- file progress reached 100%
+- `print_stall=0`
+- `bytes_invalid=0` on all three MCUs
+- no `Timer too close`
+- no lost-MCU shutdown
+- no `GreenletExit`
+- no USB bridge failure
+- no host service teardown/rebuild during the print
+- wake lock stayed held
+- Moonraker/Mainsail remained available after completion
 
-During the active test:
+This clears the previous v249 Benchy failure window. That run died after about 61:55 of actual printing with a Klippy/Moonraker teardown; v252 completed 77:34.
 
-- all three MCU send/receive sequence counters stayed aligned
-- `bytes_retransmit=0` on all three
-- `bytes_invalid=0` on all three
-- no motion stalls were reported
-- QGL completed normally
-- heaters remained off after the test
+Detailed timestamps/build/hash are in `TEST_RESULTS_2026-09-26_V252.md`.
 
-This is strong evidence that the Android USB/PTTY/Klipper path can survive real multi-MCU motion and Eddy activity.
+## Retransmits are not solved yet
 
-## Remaining failure
+The successful run still had isolated retransmit bursts. Final counters at completion were:
 
-At approximately 18:59:43, while the printer was idle after the active test, Klipper shut down with a lost-MCU timeout.
+- main MCU: 1408 retransmitted bytes, 0 invalid
+- NHK: 153 retransmitted bytes, 0 invalid
+- Eddy: 28 retransmitted bytes, 0 invalid
 
-Shutdown analysis showed all three MCU links had fallen behind:
+The largest burst was main 55 -> 1339 around 15:38:28. It did not produce a stall, invalid byte, rising steady-state latency, or lifecycle event. Keep measuring it; do not weaken Klipper safety thresholds to hide it.
 
-- STM32: retransmit activity and receive sequence lag
-- NHK RP2040: retransmit activity and receive sequence lag
-- Eddy RP2040: retransmit activity and receive sequence lag
+## What v252 changed
 
-The Android bridge also reported a full 250 ms USB bulk-write blackout. This points more toward a shared USB-host/hub/power-state interruption than a single MCU or a QGL load problem.
+Two source-level failure paths were addressed before this run:
 
-The Mainsail WebSocket remained alive after the Klipper shutdown, so this was not simply "the web UI disappeared." Screen-off is still known to break USB on the G2, but v249's kiosk keeps the display awake while it remains foreground.
+1. v249 rebuilt Klippy/Moonraker/USB on every service start. A duplicate USB attach/permission callback could therefore tear down a live host. v252 ignores duplicate starts while the persistent host is active.
+2. v249 ran six USB pump threads at `THREAD_PRIORITY_URGENT_AUDIO` while Klippy ran at normal priority. v252 gives Klippy higher scheduling priority and backs USB pumps down to foreground priority. This is especially relevant to the Fire HD 8 `Timer too close` failures.
 
-## Do not call this print-stable yet
+Neither theory is considered universally proven yet, but the G2 result strongly supports the lifecycle fix.
 
-The next meaningful gate is not another code-cleanup build. It is a longer stable host session followed by a small real print.
+## Flight recorder
 
-Before calling the G2 print-ready, we want:
+`printer_data/logs/androidklipper-host.log` now records service lifecycle, wake-lock state, Android interactive/idle state, USB session counters, permission callbacks, and historical process exit reasons.
 
-- no shared USB dropout during an idle soak
-- normal home/QGL
-- a known-good 10–20 minute print
-- no meaningful MCU retransmit growth
-- clean cooldown and continued host availability afterward
+It caught several app crashes/restarts during install/startup before the stable PID 13586 session. Those startup crashes are still worth reproducing; they did not recur during the print.
 
-## After the first good print
+Use `scripts/capture-runtime-checkpoint.py` to snapshot Moonraker state/history plus the host log and a bounded Moonraker log tail.
 
-Add these to active development:
+## Known feature gap: G-code metadata
 
-- built-in Android camera stream
-- USB webcam stream
-- Moonraker/Mainsail camera configuration
-- remote Mainsail + live camera from another LAN device
-- raw config cache for standalone boot
-- saved printer profiles instead of exact IDs/count in code
-- automatic USB detach/reconnect recovery
-- charging/power-state diagnostics and low-battery warnings
-- optional dim/black-screen kiosk mode that keeps the display logically awake
+Android Moonraker metadata extraction is still failing. Mainsail therefore shows 0/0 layers and misses normal ETA/thumbnail/SVG metadata.
 
-This checkpoint supersedes older Fire-HD-era notes that said full homing was still the main blocker.
+Treat these as one metadata-parser problem:
+
+- layer count
+- estimated print time
+- thumbnails/SVG preview
+- richer file/filament metadata
+
+## Current soak / next gate
+
+The G2 is intentionally being left powered and idle after the successful Benchy. Do not change the runtime merely to create another test case.
+
+After the idle soak:
+
+1. capture a runtime checkpoint before touching the device
+2. confirm PID/service continuity, wake lock, Moonraker/Klippy availability, and MCU counters
+3. if clean, treat G2 long-print + post-print idle as the new stable baseline
+4. repair Moonraker metadata extraction
+5. make Moonraker database/history portable across upgrades/reinstalls or exportable with the device profile
+6. retest the same v252 build on the Fire HD 8 with Desktop Commander/Termux out of the print path
+7. only then add camera/appliance features
+
+The G2 is now print-proven for one long real print. It is not yet declared universally stable across devices, power paths, or repeated long jobs.

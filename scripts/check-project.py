@@ -14,6 +14,7 @@ required = [
     "scripts/vendor-klipper.sh",
     "scripts/patch-moonraker.py",
     "scripts/vendor-moonraker.sh",
+    "scripts/capture-runtime-checkpoint.py",
     "app/src/main/python/persistent_host.py",
     "app/src/main/python/moonraker_runner.py",
 ]
@@ -249,6 +250,12 @@ assert "_ANDROID_LAST_ERROR = traceback.format_exc()" in moon_patch
 assert "direct Moonraker traceback" in moon_runner
 assert "file_system_observer: none" in moon_runner
 assert '"-l", os.path.join(p["logs_dir"], "moonraker.log")' in moon_runner
+
+checkpoint_capture = (root / "scripts/capture-runtime-checkpoint.py").read_text()
+assert "/printer/objects/query" in checkpoint_capture
+assert "/server/history/list?limit=10" in checkpoint_capture
+assert "androidklipper-host.log" in checkpoint_capture
+assert "moonraker-tail.log" in checkpoint_capture
 
 diagnostics = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/HostDiagnostics.kt").read_text()
 assert "getHistoricalProcessExitReasons" in diagnostics

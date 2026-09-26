@@ -23,7 +23,7 @@ This roadmap tracks real printer-host capability, not UI polish for its own sake
 Still needed:
 
 - [ ] automatic USB detach/reconnect recovery
-- [ ] longer idle/print soak testing
+- [ ] repeated long-print + post-print idle soak testing
 - [ ] decide whether per-packet allocation in the bulk writer is worth optimizing after a stable print baseline exists
 
 ## M2 — real Klipper host
@@ -39,8 +39,9 @@ Still needed:
 
 Current limitation:
 
-- [ ] complete a real print
-- [ ] survive long idle sessions without a shared USB-host dropout
+- [x] complete a real long print on the G2 (v252 Benchy, 77:34 print time)
+- [ ] repeat long prints and survive extended post-print idle sessions
+- [ ] characterize intermittent retransmit bursts without weakening Klipper safety checks
 
 ## M3 — Moonraker + Mainsail appliance
 
@@ -77,7 +78,8 @@ Today, the working development fixture still expects Dalton's exact three MCU ID
 ## M5 — device portability
 
 - [x] Retroid Pocket G2: real host, homing, QGL
-- [ ] Retroid Pocket G2: successful print + long soak
+- [x] Retroid Pocket G2: successful 77+ minute real print on v252
+- [ ] Retroid Pocket G2: extended post-print idle soak + repeated long print
 - [ ] Fire HD 8 retest on current transport
 - [ ] ROG Ally / alternate Android hardware test
 - [ ] cheap mainstream phone test, preferably Moto G-class hardware
@@ -85,7 +87,15 @@ Today, the working development fixture still expects Dalton's exact three MCU ID
 - [ ] charging/power-loss diagnostics
 - [ ] low-battery warning before printing
 
-## M6 — cameras
+## M6 - Moonraker state + metadata
+
+- [ ] fix Android G-code metadata extraction
+- [ ] restore layer count / ETA / thumbnails-SVG in Mainsail
+- [ ] make Moonraker database/history portable with the device/printer profile
+- [ ] add explicit database backup/export + restore path
+- [x] add repeatable runtime checkpoint capture script
+
+## M7 - cameras
 
 Start this after the first convincing print/stability result.
 
@@ -97,7 +107,7 @@ Start this after the first convincing print/stability result.
 
 Remote Mainsail itself already works; camera support is the missing piece.
 
-## M7 — polish without turning it into nonsense
+## M8 - polish without turning it into nonsense
 
 - [ ] simple first-run printer setup
 - [ ] readable health page: host, MCUs, power, storage, network

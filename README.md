@@ -22,23 +22,19 @@ The current development build runs the real stack on Android:
 
 The USB transport deliberately lives at the Android edge. Klipper itself should stay as close to upstream as possible.
 
-## Current hardware checkpoint — 2026-09-25
+## Current hardware checkpoint - 2026-09-26
 
 Primary test device: Retroid Pocket G2, Android 15.
 
-Printer: Voron 2.4 350 with three native Klipper USB MCUs:
+Printer: Voron 2.4 350 with STM32F446 main MCU, RP2040 NHK/toolhead MCU, and RP2040 Eddy MCU.
 
-- STM32F446 mainboard
-- RP2040 NHK/toolhead board
-- RP2040 Eddy/probe board
+Build v252 completed a full Benchy in **1:17:34 of actual print time** (1:22:15 total job time including home/QGL/scan) with zero print stalls, zero invalid MCU bytes, no `Timer too close`, no lost-MCU shutdown, and no AndroidKlipper service teardown during the print. This cleared the previous v249 Benchy failure window at about 61:55.
 
-Build v249 successfully completed three full homes and a Quad Gantry Level with zero retransmitted or invalid bytes during the active test. Mainsail also stayed available past the device's normal one-minute screen timeout because the kiosk now keeps the display awake.
+The successful run still had isolated USB retransmit bursts, including one larger main-MCU burst, so transport diagnostics stay enabled and repeated long runs still matter. The app now includes an Android-side flight recorder specifically so those events can be lined up with Klipper/Moonraker logs.
 
-There is still an unresolved idle USB-host failure: roughly eleven minutes into that same session, all three MCU links fell behind and Klipper shut down. The active homing/QGL workload was clean; the later failure looked like a shared Android/USB-host or hub/power-path interruption rather than one MCU failing under motion load.
+The next immediate test is an untouched post-print idle soak. Metadata extraction is also still broken on Android, which is why Mainsail currently shows 0/0 layers and lacks normal ETA/thumbnail data.
 
-So: **real printer control works, but long-duration stability is not yet print-proven.**
-
-See `docs/CHECKPOINT.md` for the detailed checkpoint and `docs/COMPATIBILITY.md` for device-portability notes.
+See `docs/CHECKPOINT.md` for the live checkpoint and `docs/TEST_RESULTS_2026-09-26_V252.md` for the full v252 run.
 
 ## Architecture in one paragraph
 
@@ -51,15 +47,15 @@ Android owns each physical USB device. AndroidKlipper forwards the raw Klipper b
 - Screen-off can suspend USB host traffic on some Android devices. The G2 currently works around that by keeping Mainsail's display technically awake.
 - USB detach/reconnect recovery is not automatic yet.
 - OTG + charging behavior varies wildly by device and hub/cable.
-- A successful real print and longer soak test are still pending.
+- One long G2 print is proven; repeated long runs, post-print idle soak, and cross-device validation are still pending.
 
 ## Next milestones
 
-1. Reproduce and isolate the remaining idle USB-host dropout.
-2. Complete a real print without USB loss.
-3. Test the same printer on the G2, Fire HD 8, ROG Ally/Android test environment, and a cheap mainstream phone such as a Moto G.
-4. Cache the raw printer config locally so AndroidKlipper can boot without the old Moonraker source.
-5. Replace the hard-coded three-MCU fixture with a saved printer profile.
+1. Finish the untouched post-print idle soak and capture a runtime checkpoint.
+2. Repair Moonraker G-code metadata extraction (layers, ETA, thumbnails/SVG).
+3. Persist/export Moonraker database history with the device/printer profile.
+4. Retest the same v252 transport on the Fire HD 8, then a cheap Moto G-class phone.
+5. Cache the raw printer config locally and replace the hard-coded three-MCU fixture with a saved printer profile.
 6. Add clean USB detach/reconnect recovery and better power diagnostics.
 7. Add camera support: built-in Android camera, USB webcam, and Mainsail/Moonraker viewing from another device.
 

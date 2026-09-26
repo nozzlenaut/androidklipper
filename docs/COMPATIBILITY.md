@@ -46,10 +46,11 @@ The intended replacement is a saved printer profile containing the expected MCU 
 
 - Android 15
 - all three development-printer MCUs identify and run through the real Klipper config
-- three homes + QGL completed cleanly on v249
-- physical screen-off interrupts USB host communication
-- v249 keeps the Mainsail kiosk display awake to avoid that known path
-- one later shared idle USB dropout still occurred with the display kept awake, so longer stability work remains
+- v252 completed a full 77:34 Benchy after home/QGL/Eddy scan
+- successful run had zero print stalls and zero invalid MCU bytes
+- isolated retransmit bursts still occur and remain under investigation
+- persistent host lifecycle guard + wake lock stayed intact through the successful print
+- physical screen-off/power-policy behavior still deserves dedicated soak testing; do not generalize one successful run into universal Android behavior
 
 ### Fire HD 8
 

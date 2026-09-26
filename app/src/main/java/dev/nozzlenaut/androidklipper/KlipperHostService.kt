@@ -370,6 +370,9 @@ class KlipperHostService : Service() {
         publishStatus(summary)
     }
 
+    // These are Android USB bridge counters, not Klipper MCU retransmit counters.
+    // Read retries can grow during normal empty bulk reads; correlate real failures with
+    // Moonraker/Klipper bytes_retransmit, bytes_invalid, and print_stall before blaming USB.
     private fun logHeartbeat() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val sessionSummary = if (sessions.isEmpty()) {

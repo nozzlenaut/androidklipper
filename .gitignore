@@ -10,3 +10,4 @@ vendor/klipper/
 app/src/main/python/klipper_vendor/
 __pycache__/
 *.pyc
+test-artifacts/
