@@ -6,6 +6,7 @@ server_path = Path(sys.argv[1])
 application_path = Path(sys.argv[2])
 machine_path = Path(sys.argv[3])
 proc_stats_path = Path(sys.argv[4])
+file_manager_path = Path(sys.argv[5])
 text = server_path.read_text()
 
 components_old = """CORE_COMPONENTS = [
@@ -302,3 +303,70 @@ if thermal_old not in proc_stats_text:
     raise SystemExit("Moonraker proc_stats thermal patch point changed")
 proc_stats_text = proc_stats_text.replace(thermal_old, thermal_new, 1)
 proc_stats_path.write_text(proc_stats_text)
+
+# Moonraker normally extracts G-code metadata by spawning sys.executable as a
+# child process. In Chaquopy sys.executable is Android's app_process binary, not
+# a standalone Python interpreter, so that child exits with SIGABRT (-6).
+# Run Moonraker's own parser in a worker thread instead.
+file_manager_text = file_manager_path.read_text()
+method_start = file_manager_text.find("    async def _run_extract_metadata(")
+method_end = file_manager_text.find("    def _create_metadata_cfg(", method_start)
+if method_start < 0 or method_end < 0:
+    raise SystemExit("Moonraker metadata method patch point changed")
+metadata_method = r"""    async def _run_extract_metadata(self,
+                                    filename: str,
+                                    ufp_path: Optional[str]
+                                    ) -> None:
+        config: Dict[str, Any] = {
+            "filename": filename,
+            "gcode_dir": self.gc_path,
+            "check_objects": self.enable_object_proc,
+            "ufp_path": ufp_path,
+            "processors": list(self.processors.values())
+        }
+        eventloop = self.server.get_event_loop()
+        decoded_resp = await eventloop.run_in_thread(
+            self._android_extract_metadata, config
+        )
+        path: str = decoded_resp["file"]
+        metadata: Dict[str, Any] = decoded_resp["metadata"]
+        if not metadata:
+            raise self.server.error("Unable to extract metadata")
+        metadata.update({"print_start_time": None, "job_id": None})
+        self.metadata[path] = metadata
+        self.mddb[path] = metadata
+
+    @staticmethod
+    def _android_extract_metadata(config: Dict[str, Any]) -> Dict[str, Any]:
+        # Import lazily so Moonraker startup stays independent of metadata work.
+        from . import metadata as metadata_module
+
+        filename = config["filename"]
+        gc_path = config["gcode_dir"]
+        file_path = os.path.join(gc_path, filename)
+        processors = [dict(proc) for proc in config.get("processors", [])]
+        processors.append({
+            "name": "preprocess_cancellation",
+            "command": metadata_module.process_objects,
+            "enabled": config.get("check_objects", False),
+            "ident": {
+                "regex": metadata_module.PPC_REGEX,
+                "location": "header"
+            }
+        })
+        try:
+            ufp_path = config.get("ufp_path")
+            if ufp_path is not None:
+                metadata_module.extract_ufp(ufp_path, file_path)
+            if not os.path.isfile(file_path):
+                raise FileNotFoundError(file_path)
+            metadata = metadata_module.extract_metadata(file_path, processors)
+        except SystemExit as exc:
+            raise RuntimeError(
+                f"Metadata parser exited while processing {filename}: {exc.code}"
+            ) from exc
+        return {"file": filename, "metadata": metadata}
+
+"""
+file_manager_text = file_manager_text[:method_start] + metadata_method + file_manager_text[method_end:]
+file_manager_path.write_text(file_manager_text)

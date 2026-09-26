@@ -180,6 +180,7 @@ moon_vendor = (root / "scripts/vendor-moonraker.sh").read_text()
 assert "9008485843740c93e0154ccbdac1fc2b02b03aaa" in moon_vendor
 assert 'cp -a "$VENDOR/moonraker" "$PY_VENDOR"' in moon_vendor
 assert "patch-moonraker.py" in moon_vendor
+assert 'components/file_manager/file_manager.py' in moon_vendor
 
 moon_patch = (root / "scripts/patch-moonraker.py").read_text()
 assert "'database', 'file_manager'" in moon_patch
@@ -189,6 +190,19 @@ assert "'authorization'" in components_new_block
 assert "android_request_stop" in moon_patch
 assert 'build_shell_command("echo \'[]\'")' in moon_patch
 assert "Signal handlers unavailable in embedded Android runtime" in moon_patch
+assert "_android_extract_metadata" in moon_patch
+assert "metadata_module.extract_metadata" in moon_patch
+assert "app_process binary" in moon_patch
+
+vendored_file_manager = root / "app/src/main/python/moonraker/components/file_manager/file_manager.py"
+if vendored_file_manager.exists():
+    fm_text = vendored_file_manager.read_text()
+    md_block = fm_text.split("    async def _run_extract_metadata(", 1)[1].split(
+        "    def _create_metadata_cfg(", 1
+    )[0]
+    assert "self._android_extract_metadata" in md_block
+    assert "metadata_module.extract_metadata" in md_block
+    assert "sys.executable" not in md_block
 
 persistent = (root / "app/src/main/python/persistent_host.py").read_text()
 assert '"apiserver": api_socket' in persistent
@@ -218,6 +232,7 @@ assert "printer_data/comms/klippy.sock" in host_service
 
 assert 'install("tornado==6.5.2")' in build
 assert 'install("distro==1.9.0")' in build
+assert 'install("Pillow==11.0.0")' in build
 assert 'install("inotify-simple==2.0.1")' in build
 assert 'implementation("org.nanohttpd:nanohttpd:2.3.1")' in build
 mainsail_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainsailServer.kt").read_text()

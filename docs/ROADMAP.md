@@ -89,8 +89,8 @@ Today, the working development fixture still expects Dalton's exact three MCU ID
 
 ## M6 - Moonraker state + metadata
 
-- [ ] fix Android G-code metadata extraction
-- [ ] restore layer count / ETA / thumbnails-SVG in Mainsail
+- [ ] validate staged in-process Android G-code metadata extraction fix on-device
+- [ ] verify layer count / ETA / thumbnails-SVG return with the metadata fix
 - [ ] make Moonraker database/history portable with the device/printer profile
 - [ ] add explicit database backup/export + restore path
 - [x] add repeatable runtime checkpoint capture script

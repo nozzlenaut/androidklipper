@@ -52,7 +52,7 @@ Android owns each physical USB device. AndroidKlipper forwards the raw Klipper b
 ## Next milestones
 
 1. Finish the untouched post-print idle soak and capture a runtime checkpoint.
-2. Repair Moonraker G-code metadata extraction (layers, ETA, thumbnails/SVG).
+2. Validate the staged in-process Moonraker metadata fix (layers, ETA, thumbnails/SVG) on the next APK.
 3. Persist/export Moonraker database history with the device/printer profile.
 4. Retest the same v252 transport on the Fire HD 8, then a cheap Moto G-class phone.
 5. Cache the raw printer config locally and replace the hard-coded three-MCU fixture with a saved printer profile.

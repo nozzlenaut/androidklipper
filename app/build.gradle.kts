@@ -83,6 +83,7 @@ chaquopy {
             install("distro==1.9.0")
             install("inotify-simple==2.0.1")
             install("PyNaCl==1.5.0")
+            install("Pillow==11.0.0")
             install("importlib_metadata==8.7.0")
         }
         extractPackages("klipper_vendor")

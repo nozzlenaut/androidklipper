@@ -17,7 +17,7 @@ for abi in arm64-v8a armeabi-v7a; do
 done
 
 unzip -p "$APK" assets/chaquopy/app.imy > "$TMP/app.imy"
-for required in   hostprobe.pyc   klipper_runner.pyc   persistent_host.pyc   moonraker_runner.pyc   klipper_vendor/klippy/klippy.py   klipper_vendor/klippy/serialhdl.py   moonraker/server.pyc   moonraker/components/application.pyc   moonraker/components/klippy_connection.pyc
+for required in   hostprobe.pyc   klipper_runner.pyc   persistent_host.pyc   moonraker_runner.pyc   klipper_vendor/klippy/klippy.py   klipper_vendor/klippy/serialhdl.py   moonraker/server.pyc   moonraker/components/application.pyc   moonraker/components/klippy_connection.pyc   moonraker/components/file_manager/file_manager.pyc   moonraker/components/file_manager/metadata.pyc
 do
   unzip -Z1 "$TMP/app.imy" | grep -Fxq "$required"
 done

@@ -20,6 +20,7 @@ python3 "$ROOT/scripts/patch-moonraker.py" \
   "$PY_VENDOR/server.py" \
   "$PY_VENDOR/components/application.py" \
   "$PY_VENDOR/components/machine.py" \
-  "$PY_VENDOR/components/proc_stats.py"
+  "$PY_VENDOR/components/proc_stats.py" \
+  "$PY_VENDOR/components/file_manager/file_manager.py"
 
 echo "Vendored Moonraker $MOONRAKER_COMMIT"

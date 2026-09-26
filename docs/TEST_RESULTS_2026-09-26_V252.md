@@ -83,3 +83,20 @@ Treat layer count, ETA, thumbnails, and richer file metadata as one metadata-par
 ## Post-print plan
 
 Leave the successful host powered and idle for an extended soak. After the soak, capture the same status/history/flight-recorder snapshot before changing anything. If idle remains clean, the next useful steps are metadata repair, Moonraker database persistence/backup, and a v252 Fire HD 8 retest before adding more host complexity.
+
+
+## Metadata follow-up after the print
+
+The v252 Moonraker log confirmed that metadata extraction was failing before the
+parser ever ran. Moonraker tried to launch `metadata.py` with
+`/system/bin/app_process64` because Chaquopy exposes that as `sys.executable`.
+Each attempt exited with return code `-6`.
+
+A repo-only fix is now staged for the next APK: call Moonraker's existing
+metadata parser in-process on its worker thread instead of spawning a child
+Python process. Pillow 11.0.0 is also added for thumbnail handling. This is not
+part of the installed v252 build and still needs on-device validation.
+
+The actual Benchy was parsed successfully with the pinned upstream parser on
+the desktop: PrusaSlicer 2.9.3, estimated time 4559 s, object height 48.0 mm,
+0.2 mm layer height, 0.2 mm first layer, and 64x64 + 400x300 thumbnails.
