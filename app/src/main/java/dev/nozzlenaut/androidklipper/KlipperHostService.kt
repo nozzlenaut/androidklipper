@@ -12,6 +12,7 @@ import android.os.Environment
 import android.system.Os
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.Process
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
@@ -23,18 +24,34 @@ import java.net.Socket
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class KlipperHostService : Service() {
     private val sessions = CopyOnWriteArrayList<UsbSerialSession>()
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
     private val hostExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "androidklipper-host").apply { isDaemon = true }
+        Thread({
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND) }
+            task.run()
+        }, "androidklipper-host").apply { isDaemon = false }
     }
     private val klippyExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "androidklipper-klippy").apply { isDaemon = true }
+        Thread({
+            // Klippy owns the timing deadlines. Keep it above the USB pumps.
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
+            task.run()
+        }, "androidklipper-klippy").apply { isDaemon = false }
     }
     private val moonrakerExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "androidklipper-moonraker").apply { isDaemon = true }
+        Thread(task, "androidklipper-moonraker").apply { isDaemon = false }
+    }
+    private val watchdogExecutor = Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "androidklipper-watchdog").apply { isDaemon = false }
+    }
+    private val persistentHostActive = AtomicBoolean(false)
+    private val servicePrefs by lazy {
+        getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
     }
     private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
     private val mainsailServer by lazy { MainsailServer(this) }
@@ -42,32 +59,69 @@ class KlipperHostService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        HostDiagnostics.log(this, "service onCreate")
+        HostDiagnostics.recordPreviousProcessExits(this)
         createNotificationChannel()
         runCatching { statusServer.start() }
         runCatching { mainsailServer.startServer() }
+        watchdogExecutor.scheduleAtFixedRate(
+            { logHeartbeat() },
+            30,
+            60,
+            TimeUnit.SECONDS
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val fullSmoke = intent?.getBooleanExtra(EXTRA_FULL_SMOKE, false) ?: false
-        val realConfig = intent?.getBooleanExtra(EXTRA_REAL_CONFIG, false) ?: false
+        val realConfig = intent?.getBooleanExtra(EXTRA_REAL_CONFIG, false)
+            ?: servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)
+        HostDiagnostics.log(
+            this,
+            "onStartCommand startId=$startId flags=$flags nullIntent=${intent == null} " +
+                "fullSmoke=$fullSmoke realConfig=$realConfig"
+        )
+
         val startText = when {
             realConfig -> "Starting persistent Klipper + Moonraker…"
             fullSmoke -> "Starting full Klippy smoke test…"
             else -> "Starting USB host test…"
         }
         startForeground(NOTIFICATION_ID, notification(startText))
-        // Real host mode must keep running like an SBC even if Android blanks the display.
-        // Acquire before USB identify so auto-start is protected even with the screen off.
         if (realConfig) acquireHostWakeLock()
-        // USB permission callbacks can arrive close together for multi-MCU printers.
-        // Serialize rebuilds so two service starts never fight over the same device.
-        hostExecutor.execute { rebuildSessions(fullSmoke, realConfig) }
-        // This is still a diagnostic host. Never let Android silently recreate
-        // it later with a null Intent and an ambiguous/default test mode.
-        return START_NOT_STICKY
+
+        // A second USB attach/permission callback must never tear down a live print.
+        // v249 rebuilt the whole host on every service start, and rebuildSessions()
+        // deliberately stops Klippy/Moonraker before reopening USB.
+        if (persistentHostActive.get()) {
+            HostDiagnostics.log(
+                this,
+                "start ignored: persistent host is already starting/running"
+            )
+            return START_STICKY
+        }
+        if (realConfig) persistentHostActive.set(true)
+
+        hostExecutor.execute {
+            try {
+                rebuildSessions(fullSmoke, realConfig)
+            } catch (t: Throwable) {
+                if (realConfig) persistentHostActive.set(false)
+                HostDiagnostics.log(
+                    this,
+                    "rebuildSessions ERROR ${t.javaClass.simpleName}: ${t.message}"
+                )
+                publishStatus("Host startup ERROR ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+        return if (realConfig) START_STICKY else START_NOT_STICKY
     }
 
     private fun rebuildSessions(fullSmoke: Boolean, realConfig: Boolean) {
+        HostDiagnostics.log(
+            this,
+            "rebuildSessions begin fullSmoke=$fullSmoke realConfig=$realConfig sessions=${sessions.size}"
+        )
         if (Python.isStarted()) {
             val python = Python.getInstance()
             runCatching { python.getModule("moonraker_runner").callAttr("stop") }
@@ -134,6 +188,10 @@ class KlipperHostService : Service() {
                 }
                 val pty = PtyBridge.create()
                 val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
+                    HostDiagnostics.log(
+                        this,
+                        "USB bridge error for $stableId: ${error.javaClass.simpleName}: ${error.message}"
+                    )
                     publishStatus("USB bridge error for $stableId: ${error.message}")
                 }
                 session.start()
@@ -174,7 +232,9 @@ class KlipperHostService : Service() {
 
         if (realConfig) {
             if (!allIdentified || stablePtyMap.size != supported.size) {
+                persistentHostActive.set(false)
                 releaseHostWakeLock()
+                HostDiagnostics.log(this, "persistent host skipped: MCU identify incomplete")
                 statusLines += "Persistent host SKIPPED: every supported USB device must identify as a Klipper MCU first."
             } else {
                 val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
@@ -186,6 +246,7 @@ class KlipperHostService : Service() {
                 )
 
                 klippyExecutor.execute {
+                    HostDiagnostics.log(this, "Klippy worker starting")
                     try {
                         val persistent = Python.getInstance().getModule("persistent_host")
                         val result = persistent.callAttr(
@@ -195,9 +256,16 @@ class KlipperHostService : Service() {
                             helper.absolutePath,
                             filesDir.absolutePath
                         ).toString()
+                        HostDiagnostics.log(this, "Klippy worker returned: $result")
                         publishStatus("Persistent Klippy stopped\n\n$result")
                     } catch (t: Throwable) {
+                        HostDiagnostics.log(
+                            this,
+                            "Klippy worker ERROR ${t.javaClass.simpleName}: ${t.message}"
+                        )
                         publishStatus("Persistent Klippy ERROR ${t.javaClass.simpleName}: ${t.message}")
+                    } finally {
+                        persistentHostActive.set(false)
                     }
                 }
 
@@ -211,7 +279,9 @@ class KlipperHostService : Service() {
                 }
 
                 if (!klippySocketReady) {
+                    persistentHostActive.set(false)
                     releaseHostWakeLock()
+                    HostDiagnostics.log(this, "persistent host failed: Klippy API socket did not appear")
                     statusLines += "Persistent Klippy ERROR: API socket did not appear."
                 } else {
                     statusLines += "Persistent Klippy API: ${klippySocket.absolutePath}"
@@ -222,11 +292,17 @@ class KlipperHostService : Service() {
                     )
 
                     moonrakerExecutor.execute {
+                        HostDiagnostics.log(this, "Moonraker worker starting")
                         try {
                             val runner = Python.getInstance().getModule("moonraker_runner")
                             val result = runner.callAttr("run", filesDir.absolutePath).toString()
+                            HostDiagnostics.log(this, "Moonraker worker returned: $result")
                             publishStatus("Moonraker stopped\n\n$result")
                         } catch (t: Throwable) {
+                            HostDiagnostics.log(
+                                this,
+                                "Moonraker worker ERROR ${t.javaClass.simpleName}: ${t.message}"
+                            )
                             publishStatus("Moonraker ERROR ${t.javaClass.simpleName}: ${t.message}")
                         }
                     }
@@ -276,6 +352,11 @@ class KlipperHostService : Service() {
             }
         }
 
+        HostDiagnostics.log(
+            this,
+            "rebuildSessions end realConfig=$realConfig supported=${supported.size} identified=${smokePtyPaths.size}"
+        )
+
         val summary = if (statusLines.isEmpty()) {
             "No supported USB serial devices with permission."
         } else {
@@ -287,6 +368,23 @@ class KlipperHostService : Service() {
             title + "\n\n" + statusLines.joinToString("\n\n")
         }
         publishStatus(summary)
+    }
+
+    private fun logHeartbeat() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val sessionSummary = if (sessions.isEmpty()) {
+            "none"
+        } else {
+            sessions.joinToString(" | ") { session ->
+                "${session.stableId.takeLast(8)} ${session.statsSnapshot()}"
+            }
+        }
+        HostDiagnostics.log(
+            this,
+            "heartbeat persistent=${persistentHostActive.get()} " +
+                "wakeLock=${hostWakeLock?.isHeld == true} interactive=${powerManager.isInteractive} " +
+                "deviceIdle=${powerManager.isDeviceIdleMode} sessions=${sessions.size} $sessionSummary"
+        )
     }
 
     private fun prepareGcodeStorage(): String {
@@ -357,13 +455,16 @@ class KlipperHostService : Service() {
             setReferenceCounted(false)
             acquire()
         }
+        HostDiagnostics.log(this, "wake lock acquired held=${hostWakeLock?.isHeld == true}")
     }
 
     private fun releaseHostWakeLock() {
+        val wasHeld = hostWakeLock?.isHeld == true
         hostWakeLock?.let { lock ->
             if (lock.isHeld) runCatching { lock.release() }
         }
         hostWakeLock = null
+        if (wasHeld) HostDiagnostics.log(this, "wake lock released")
     }
 
     private fun publishStatus(text: String) {
@@ -400,7 +501,22 @@ class KlipperHostService : Service() {
         }
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        HostDiagnostics.log(this, "service onTaskRemoved")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        HostDiagnostics.log(this, "service onTrimMemory level=$level")
+        super.onTrimMemory(level)
+    }
+
     override fun onDestroy() {
+        HostDiagnostics.log(
+            this,
+            "service onDestroy begin persistent=${persistentHostActive.get()} sessions=${sessions.size}"
+        )
+        persistentHostActive.set(false)
         if (Python.isStarted()) {
             val python = Python.getInstance()
             runCatching { python.getModule("moonraker_runner").callAttr("stop") }
@@ -408,12 +524,14 @@ class KlipperHostService : Service() {
         }
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
+        watchdogExecutor.shutdownNow()
         hostExecutor.shutdownNow()
         moonrakerExecutor.shutdownNow()
         klippyExecutor.shutdownNow()
         statusServer.close()
         runCatching { mainsailServer.stop() }
         releaseHostWakeLock()
+        HostDiagnostics.log(this, "service onDestroy end")
         super.onDestroy()
     }
 
@@ -428,6 +546,8 @@ class KlipperHostService : Service() {
         const val KEY_AUTO_START_USB = "auto_start_usb"
         const val KEY_AUTO_START_IN_PROGRESS = "auto_start_in_progress"
         const val KEY_AUTO_KIOSK_PENDING = "auto_kiosk_pending"
+        private const val PREF_SERVICE_STATE = "service_state"
+        private const val KEY_DESIRED_REAL_HOST = "desired_real_host"
         private const val CONFIG_SOURCE_URL = "http://192.168.1.83:7125"
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
@@ -438,6 +558,14 @@ class KlipperHostService : Service() {
             fullSmoke: Boolean = false,
             realConfig: Boolean = false
         ) {
+            if (realConfig) {
+                context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_DESIRED_REAL_HOST, true).apply()
+            }
+            HostDiagnostics.log(
+                context,
+                "service start requested fullSmoke=$fullSmoke realConfig=$realConfig"
+            )
             val intent = Intent(context, KlipperHostService::class.java).apply {
                 putExtra(EXTRA_FULL_SMOKE, fullSmoke)
                 putExtra(EXTRA_REAL_CONFIG, realConfig)
@@ -445,5 +573,16 @@ class KlipperHostService : Service() {
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
             else context.startService(intent)
         }
+
+        fun stop(context: Context) {
+            context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_DESIRED_REAL_HOST, false).apply()
+            HostDiagnostics.log(context, "service stop requested")
+            context.stopService(Intent(context, KlipperHostService::class.java))
+        }
+
+        fun isPersistentHostDesired(context: Context): Boolean =
+            context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
+                .getBoolean(KEY_DESIRED_REAL_HOST, false)
     }
 }

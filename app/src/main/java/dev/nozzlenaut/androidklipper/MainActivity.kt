@@ -113,7 +113,7 @@ class MainActivity : Activity() {
         val stop = Button(this).apply {
             text = "Stop Klipper/Moonraker host"
             setOnClickListener {
-                stopService(Intent(this@MainActivity, KlipperHostService::class.java))
+                KlipperHostService.stop(this@MainActivity)
                 status.text = "Host test stopped."
             }
         }
@@ -176,6 +176,11 @@ class MainActivity : Activity() {
     }
 
     private fun handleUsbAttach() {
+        HostDiagnostics.log(
+            this,
+            "MainActivity USB_DEVICE_ATTACHED autoStart=" +
+                automationPrefs.getBoolean(KlipperHostService.KEY_AUTO_START_USB, false)
+        )
         if (!automationPrefs.getBoolean(KlipperHostService.KEY_AUTO_START_USB, false)) {
             scanUsb()
             return

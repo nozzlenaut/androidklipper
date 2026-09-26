@@ -82,7 +82,7 @@ class UsbSerialSession(
         val writeEndpoint = serialPort.writeEndpoint
 
         usbReader = Thread({
-            setUrgentIoPriority()
+            setUsbIoPriority()
             val buffer = ByteArray(BUFFER_SIZE)
             while (running.get()) {
                 try {
@@ -122,7 +122,7 @@ class UsbSerialSession(
         }, "usb-to-pty-${stableId.takeLast(8)}").also { it.start() }
 
         ptyReader = Thread({
-            setUrgentIoPriority()
+            setUsbIoPriority()
             val buffer = ByteArray(BUFFER_SIZE)
             while (running.get()) {
                 try {
@@ -142,7 +142,7 @@ class UsbSerialSession(
 
     private fun startPtyToSerial(serialPort: UsbSerialPort) {
         ptyReader = Thread({
-            setUrgentIoPriority()
+            setUsbIoPriority()
             val buffer = ByteArray(BUFFER_SIZE)
             while (running.get()) {
                 try {
@@ -224,9 +224,14 @@ class UsbSerialSession(
             device.productId == UsbDeviceScanner.KLIPPER_PID
     }
 
-    private fun setUrgentIoPriority() {
-        runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
+    private fun setUsbIoPriority() {
+        // Six urgent-audio bridge threads (two per MCU) can starve Klippy on
+        // weaker Android devices. USB still gets foreground priority, but the
+        // Klippy reactor now runs above it.
+        runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND) }
     }
+
+    fun statsSnapshot(): String = stats()
 
     private fun stats(): String =
         "rx=${rxBytes.get()} tx=${txBytes.get()} " +

@@ -17,9 +17,7 @@ class DebugControlReceiver : BroadcastReceiver() {
             }
 
             ACTION_STOP -> {
-                context.stopService(
-                    Intent(context, KlipperHostService::class.java)
-                )
+                KlipperHostService.stop(context)
             }
         }
     }

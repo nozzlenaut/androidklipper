@@ -6,12 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import dev.nozzlenaut.androidklipper.HostDiagnostics
 import dev.nozzlenaut.androidklipper.KlipperHostService
 
 class UsbPermissionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_USB_PERMISSION) return
         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+        HostDiagnostics.log(context, "USB permission callback granted=$granted")
         if (!granted) {
             context.getSharedPreferences(
                 KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE
@@ -40,6 +42,10 @@ class UsbPermissionReceiver : BroadcastReceiver() {
         if (next != null) {
             requestNext(context, manager, next, fullSmoke, realConfig)
         } else if (supported.isNotEmpty()) {
+            HostDiagnostics.log(
+                context,
+                "USB permission chain complete; starting service fullSmoke=$fullSmoke realConfig=$realConfig"
+            )
             KlipperHostService.start(context, fullSmoke, realConfig)
             context.getSharedPreferences(
                 KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE

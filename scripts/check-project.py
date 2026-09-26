@@ -6,6 +6,7 @@ required = [
     "app/src/main/AndroidManifest.xml",
     "app/src/main/cpp/pty_bridge.cpp",
     "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt",
+    "app/src/main/java/dev/nozzlenaut/androidklipper/HostDiagnostics.kt",
     "app/src/main/java/dev/nozzlenaut/androidklipper/LocalStatusServer.kt",
     "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt",
     "app/src/main/python/hostprobe.py",
@@ -63,6 +64,9 @@ assert "writeRetryCount" in usb_session
 assert "failSession(" in usb_session
 assert "thread.join(IO_THREAD_JOIN_TIMEOUT_MS)" in usb_session
 assert "Thread.sleep(5)" not in usb_session
+assert "THREAD_PRIORITY_URGENT_AUDIO" not in usb_session
+assert "THREAD_PRIORITY_FOREGROUND" in usb_session
+assert "statsSnapshot" in usb_session
 
 klipper_patch = (root / "scripts/patch-klipper.py").read_text()
 assert 'trsync_needle = "TRSYNC_TIMEOUT = 0.025"' in klipper_patch
@@ -108,7 +112,10 @@ assert "stablePtyMap" in host_service
 assert "probe_full_klippy" in host_service
 assert "http://192.168.1.83:7125" in host_service
 assert "START_NOT_STICKY" in host_service
-assert "return START_STICKY" not in host_service
+assert "START_STICKY" in host_service
+assert "persistentHostActive" in host_service
+assert "HostDiagnostics.log" in host_service
+assert "THREAD_PRIORITY_URGENT_DISPLAY" in host_service
 assert "Only arm a PTY for full/real Klippy after the MCU has" in host_service
 assert "KEY_AUTO_START_USB" in host_service
 assert "KEY_AUTO_KIOSK_PENDING" in host_service
@@ -242,5 +249,9 @@ assert "_ANDROID_LAST_ERROR = traceback.format_exc()" in moon_patch
 assert "direct Moonraker traceback" in moon_runner
 assert "file_system_observer: none" in moon_runner
 assert '"-l", os.path.join(p["logs_dir"], "moonraker.log")' in moon_runner
+
+diagnostics = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/HostDiagnostics.kt").read_text()
+assert "getHistoricalProcessExitReasons" in diagnostics
+assert "androidklipper-host.log" in diagnostics
 
 print("project invariants: PASS")
