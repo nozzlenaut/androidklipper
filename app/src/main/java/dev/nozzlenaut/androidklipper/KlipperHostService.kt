@@ -254,7 +254,8 @@ class KlipperHostService : Service() {
                             CONFIG_SOURCE_URL,
                             stableMapping,
                             helper.absolutePath,
-                            filesDir.absolutePath
+                            filesDir.absolutePath,
+                            deviceDisplayName()
                         ).toString()
                         HostDiagnostics.log(this, "Klippy worker returned: $result")
                         publishStatus("Persistent Klippy stopped\n\n$result")
@@ -446,6 +447,25 @@ class KlipperHostService : Service() {
             internalGcodes.mkdirs()
             "G-code storage WARNING: SD link failed (" + t.javaClass.simpleName + ": " + t.message + "); using internal storage"
         }
+    }
+
+    private fun deviceDisplayName(): String {
+        // Prefer Android's user-visible device name when the vendor exposes it.
+        // Fall back to Build fields so Mainsail never has to call this "localhost".
+        val configured = runCatching {
+            android.provider.Settings.Global.getString(contentResolver, "device_name")
+        }.getOrNull()?.trim()?.takeIf {
+            it.isNotEmpty() && !it.equals("localhost", ignoreCase = true)
+        }
+        if (configured != null) return configured
+
+        val manufacturer = Build.MANUFACTURER.trim()
+        val model = Build.MODEL.trim()
+        if (model.isEmpty()) return manufacturer.ifEmpty { "AndroidKlipper" }
+        if (manufacturer.isEmpty() || model.startsWith(manufacturer, ignoreCase = true)) {
+            return model
+        }
+        return "$manufacturer $model"
     }
 
     private fun acquireHostWakeLock() {

@@ -130,3 +130,18 @@ if len(sys.argv) >= 8:
             "Klippy gcode_io patch point changed; inspect upstream before updating the pin")
     gcode_path.write_text(
         gcode_text.replace(gcode_needle, gcode_replacement, 1))
+
+
+if len(sys.argv) >= 9:
+    webhooks_path = Path(sys.argv[8])
+    webhooks_text = webhooks_path.read_text()
+    hostname_needle = "'hostname': socket.gethostname(),"
+    hostname_replacement = (
+        "'hostname': self.printer.get_start_args().get("
+        "'hostname', socket.gethostname()),"
+    )
+    if hostname_needle not in webhooks_text:
+        raise SystemExit(
+            "Klippy webhooks hostname patch point changed; inspect upstream before updating the pin")
+    webhooks_path.write_text(
+        webhooks_text.replace(hostname_needle, hostname_replacement, 1))

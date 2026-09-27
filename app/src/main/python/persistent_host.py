@@ -134,7 +134,7 @@ def stop():
         return "Klippy stop ERROR %s: %s" % (type(exc).__name__, exc)
 
 
-def run(base_url, stable_mapping, c_helper_path, work_dir):
+def run(base_url, stable_mapping, c_helper_path, work_dir, device_name):
     """Run the real Voron config persistently and expose Klipper's API socket.
 
     This function intentionally blocks for the lifetime of Klippy.  Android
@@ -166,6 +166,7 @@ def run(base_url, stable_mapping, c_helper_path, work_dir):
         "gcode_fd": None,
         "software_version": "androidklipper-persistent",
         "log_file": log_path,
+        "hostname": str(device_name).strip() or "AndroidKlipper",
     }
 
     skipped_summary = ", ".join(sorted(set(skipped))) or "none"

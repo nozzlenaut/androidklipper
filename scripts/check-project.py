@@ -36,6 +36,12 @@ assert 'product-id="24910"' in device_filter
 build = (root / "app/build.gradle.kts").read_text()
 assert 'GITHUB_RUN_NUMBER' in build
 assert 'version = "3.11"' in build
+
+service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
+assert 'deviceDisplayName()' in service
+assert 'Settings.Global.getString(contentResolver, "device_name")' in service
+persistent_host = (root / "app/src/main/python/persistent_host.py").read_text()
+assert '"hostname": str(device_name).strip() or "AndroidKlipper"' in persistent_host
 assert 'armeabi-v7a' in build and 'arm64-v8a' in build
 assert 'usb-serial-for-android:3.11.0' in build
 
@@ -72,6 +78,8 @@ assert "statsSnapshot" in usb_session
 klipper_patch = (root / "scripts/patch-klipper.py").read_text()
 assert 'trsync_needle = "TRSYNC_TIMEOUT = 0.025"' in klipper_patch
 assert 'trsync_replacement = "TRSYNC_TIMEOUT = 0.050"' in klipper_patch
+assert "self.printer.get_start_args().get(" in klipper_patch
+assert "'hostname', socket.gethostname()" in klipper_patch
 
 pty_bridge = (root / "app/src/main/cpp/pty_bridge.cpp").read_text()
 assert "cfmakeraw" in pty_bridge
@@ -210,7 +218,7 @@ assert '"gcode_fd": None' in persistent
 assert '"printer_data"' in persistent
 assert '"comms", "klippy.sock"' in persistent
 assert "def stop():" in persistent
-assert "def run(base_url, stable_mapping, c_helper_path, work_dir):" in persistent
+assert "def run(base_url, stable_mapping, c_helper_path, work_dir, device_name):" in persistent
 
 moon_runner = (root / "app/src/main/python/moonraker_runner.py").read_text()
 assert "host: 0.0.0.0" in moon_runner
