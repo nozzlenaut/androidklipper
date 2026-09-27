@@ -1,6 +1,9 @@
 package dev.nozzlenaut.androidklipper
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
 import java.net.URLDecoder
@@ -44,6 +47,34 @@ class MainsailServer(
             ).apply {
                 addHeader("Cache-Control", "no-store, max-age=0")
                 addHeader("Service-Worker-Allowed", "/")
+            }
+        }
+
+        if (uri.substringBefore('?') == "/androidklipper/battery") {
+            val batteryIntent = context.registerReceiver(
+                null,
+                IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            )
+            val present = batteryIntent?.getBooleanExtra(BatteryManager.EXTRA_PRESENT, false) == true
+            val rawLevel = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            val level = if (present && rawLevel >= 0 && scale > 0) {
+                ((rawLevel * 100f) / scale).toInt().coerceIn(0, 100)
+            } else {
+                null
+            }
+            val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+            val json = """
+                {
+                  "present": $present,
+                  "level": ${level?.toString() ?: "null"},
+                  "charging": $charging
+                }
+            """.trimIndent()
+            return newFixedLengthResponse(Response.Status.OK, "application/json", json).apply {
+                addHeader("Cache-Control", "no-store")
             }
         }
 
