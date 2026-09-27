@@ -3,11 +3,12 @@ name: Android build
 on:
   push:
     branches: [main]
+    tags: ['androidklipper-*']
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 concurrency:
@@ -19,12 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Keep two existing APKs. The new build adds the third one afterward.
+      # Keep one existing APK. GitHub quota accounting can lag deleted artifacts by hours.
       - name: Clean old Android build artifacts
         uses: actions/github-script@v7
         with:
           script: |
-            const keep = 2;
+            const keep = 1;
             const artifacts = await github.paginate(
               github.rest.actions.listArtifactsForRepo,
               {
@@ -129,9 +130,41 @@ jobs:
       - name: Inspect packaged APK
         run: bash scripts/inspect-apk.sh
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload debug APK
+        id: upload-debug-apk
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: androidklipper-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3
+
+      - name: Warn if GitHub artifact quota blocked upload
+        if: steps.upload-debug-apk.outcome == 'failure'
+        run: |
+          echo "::warning::APK build/tests/inspection passed, but GitHub could not store the debug artifact. Check Actions storage quota; quota recalculation may lag deletions by 6-12 hours."
+
+      # Tagged builds also publish as a prerelease asset. Release assets do not
+      # consume the Actions artifact quota, so a good APK remains retrievable
+      # even when upload-artifact is temporarily blocked by quota accounting.
+      - name: Publish tagged APK prerelease
+        if: startsWith(github.ref, 'refs/tags/androidklipper-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          out="AndroidKlipper-${GITHUB_REF_NAME}.apk"
+          cp "$apk" "$out"
+          sha="$(sha256sum "$out" | awk '{print $1}')"
+          {
+            echo "Debug APK built from commit ${GITHUB_SHA}."
+            echo
+            echo "SHA256: ${sha}"
+            echo
+            echo "Klipper engine remains pinned by the repository vendor scripts; MCU firmware is not flashed automatically."
+          } > release-notes.txt
+          gh release create "$GITHUB_REF_NAME" "$out" \
+            --prerelease \
+            --title "AndroidKlipper ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.txt
