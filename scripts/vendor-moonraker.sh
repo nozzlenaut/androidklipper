@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+PYTHON_BIN="${PYTHON:-python3}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$ROOT/vendor/moonraker"
@@ -16,7 +17,7 @@ git -C "$VENDOR" checkout "$MOONRAKER_COMMIT"
 cp -a "$VENDOR/moonraker" "$PY_VENDOR"
 printf "__version__ = 'v0.10.0-20-g9008485-android'\n" > "$PY_VENDOR/__version__.py"
 
-python3 "$ROOT/scripts/patch-moonraker.py" \
+"$PYTHON_BIN" "$ROOT/scripts/patch-moonraker.py" \
   "$PY_VENDOR/server.py" \
   "$PY_VENDOR/components/application.py" \
   "$PY_VENDOR/components/machine.py" \

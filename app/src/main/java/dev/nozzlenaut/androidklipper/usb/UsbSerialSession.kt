@@ -29,6 +29,7 @@ class UsbSerialSession(
     private val txBytes = AtomicLong(0)
     private val readRetryCount = AtomicLong(0)
     private val writeRetryCount = AtomicLong(0)
+    private val maxWriteTransferUs = AtomicLong(0)
 
     fun start() {
         try {
@@ -162,18 +163,22 @@ class UsbSerialSession(
         var offset = 0
         var consecutiveFailures = 0
         var failureWindowStartedAt = 0L
-        val packetSize = endpoint.maxPacketSize.coerceAtLeast(1)
 
         while (offset < length && running.get()) {
-            val chunkLength = minOf(length - offset, packetSize)
-            val chunk = source.copyOfRange(offset, offset + chunkLength)
-
+            val remaining = length - offset
+            // bulkTransfer() already packetizes to endpoint.maxPacketSize. Use its
+            // offset overload so a normal Klipper burst is one Java -> USB call and
+            // partial-write retries do not allocate/copy another byte array.
+            val startedNs = System.nanoTime()
             val written = connection.bulkTransfer(
                 endpoint,
-                chunk,
-                chunkLength,
+                source,
+                offset,
+                remaining,
                 WRITE_ATTEMPT_TIMEOUT_MS
             )
+            val transferUs = (System.nanoTime() - startedNs) / 1_000
+            maxWriteTransferUs.getAndUpdate { old -> maxOf(old, transferUs) }
 
             if (written > 0) {
                 offset += written
@@ -183,10 +188,6 @@ class UsbSerialSession(
                 continue
             }
 
-            // Android's Java USB API only gives us -1 here. One immediate failure
-            // is not proof that the MCU disappeared, so retry the exact unsent
-            // bytes. A genuinely disconnected device will exhaust this small,
-            // bounded retry window and then fail cleanly.
             if (consecutiveFailures == 0) {
                 failureWindowStartedAt = System.nanoTime()
             }
@@ -197,10 +198,9 @@ class UsbSerialSession(
             if (elapsedMs >= MAX_WRITE_RETRY_WINDOW_MS) {
                 throw IOException(
                     "USB bulk write retries exhausted for $stableId at $offset/$length " +
-                        "after ${elapsedMs}ms (rc=$written, packet=$packetSize); ${stats()}"
+                        "after ${elapsedMs}ms (rc=$written, maxTransferUs=${maxWriteTransferUs.get()}); ${stats()}"
                 )
             }
-
             Thread.sleep(WRITE_RETRY_BACKOFF_MS)
         }
 
@@ -235,7 +235,8 @@ class UsbSerialSession(
 
     private fun stats(): String =
         "rx=${rxBytes.get()} tx=${txBytes.get()} " +
-            "readRetries=${readRetryCount.get()} writeRetries=${writeRetryCount.get()}"
+            "readRetries=${readRetryCount.get()} writeRetries=${writeRetryCount.get()} " +
+            "maxWriteUs=${maxWriteTransferUs.get()}"
 
     private fun withStats(prefix: String, cause: Throwable): IOException =
         IOException("$prefix for $stableId: ${cause.message}; ${stats()}", cause)

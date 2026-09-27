@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+PYTHON_BIN="${PYTHON:-python3}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$ROOT/vendor/klipper"
@@ -21,8 +22,9 @@ cp -a "$VENDOR/klippy/extras" "$PY_ROOT/"
 cp -a "$VENDOR/klippy/kinematics" "$PY_ROOT/"
 touch "$PY_VENDOR/__init__.py"
 printf '%s\n' "$KLIPPER_COMMIT" > "$PY_VENDOR/KLIPPER_COMMIT"
+git -C "$VENDOR" describe --always --tags --long > "$PY_VENDOR/KLIPPER_VERSION"
 
-python3 "$ROOT/scripts/patch-klipper.py" \
+"$PYTHON_BIN" "$ROOT/scripts/patch-klipper.py" \
   "$PY_VENDOR/klippy/chelper/__init__.py" \
   "$PY_VENDOR/klippy/serialhdl.py" \
   "$PY_VENDOR/klippy/mcu.py" \
@@ -30,6 +32,7 @@ python3 "$ROOT/scripts/patch-klipper.py" \
   "$PY_VENDOR/klippy/extras/statistics.py" \
   "$PY_ROOT/extras/statistics.py" \
   "$PY_VENDOR/klippy/gcode.py" \
-  "$PY_VENDOR/klippy/webhooks.py"
+  "$PY_VENDOR/klippy/webhooks.py" \
+  "$PY_VENDOR/klippy/toolhead.py"
 
 echo "Vendored Klipper $KLIPPER_COMMIT"

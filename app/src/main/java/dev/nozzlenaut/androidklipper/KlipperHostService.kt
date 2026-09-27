@@ -12,12 +12,14 @@ import android.os.Environment
 import android.system.Os
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.Process
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
+import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -38,8 +40,10 @@ class KlipperHostService : Service() {
     }
     private val klippyExecutor = Executors.newSingleThreadExecutor { task ->
         Thread({
-            // Klippy owns the timing deadlines. Keep it above the USB pumps.
-            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
+            // Klippy owns the hard timing deadlines. On a dedicated printer
+            // host give its reactor the strongest app-level deadline-oriented
+            // priority; USB bridge threads remain at FOREGROUND below it.
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
             task.run()
         }, "androidklipper-klippy").apply { isDaemon = false }
     }
@@ -50,6 +54,7 @@ class KlipperHostService : Service() {
         Thread(task, "androidklipper-watchdog").apply { isDaemon = false }
     }
     private val persistentHostActive = AtomicBoolean(false)
+    private val firmwareRestartRecoveryPending = AtomicBoolean(false)
     private val servicePrefs by lazy {
         getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
     }
@@ -149,6 +154,7 @@ class KlipperHostService : Service() {
 
         try {
             statusLines += hostprobe.callAttr("probe_klipper_import").toString()
+            statusLines += hostprobe.callAttr("probe_klipper_version").toString()
             statusLines += hostprobe.callAttr("probe_c_helper", helper.absolutePath).toString()
         } catch (t: Throwable) {
             statusLines += "Host runtime ERROR ${t.javaClass.simpleName}: ${t.message}"
@@ -247,6 +253,7 @@ class KlipperHostService : Service() {
 
                 klippyExecutor.execute {
                     HostDiagnostics.log(this, "Klippy worker starting")
+                    var firmwareRestartRequested = false
                     try {
                         val persistent = Python.getInstance().getModule("persistent_host")
                         val result = persistent.callAttr(
@@ -257,8 +264,13 @@ class KlipperHostService : Service() {
                             filesDir.absolutePath,
                             deviceDisplayName()
                         ).toString()
+                        firmwareRestartRequested = result.contains("firmware_restart")
                         HostDiagnostics.log(this, "Klippy worker returned: $result")
-                        publishStatus("Persistent Klippy stopped\n\n$result")
+                        if (firmwareRestartRequested) {
+                            publishStatus("Firmware restart: rebinding Android USB sessions?")
+                        } else {
+                            publishStatus("Persistent Klippy stopped\n\n$result")
+                        }
                     } catch (t: Throwable) {
                         HostDiagnostics.log(
                             this,
@@ -267,6 +279,10 @@ class KlipperHostService : Service() {
                         publishStatus("Persistent Klippy ERROR ${t.javaClass.simpleName}: ${t.message}")
                     } finally {
                         persistentHostActive.set(false)
+                        if (firmwareRestartRequested &&
+                            servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)) {
+                            scheduleFirmwareRestartRecovery(sessions.size)
+                        }
                     }
                 }
 
@@ -369,6 +385,88 @@ class KlipperHostService : Service() {
             title + "\n\n" + statusLines.joinToString("\n\n")
         }
         publishStatus(summary)
+    }
+
+    private fun scheduleFirmwareRestartRecovery(expectedDevices: Int) {
+        if (expectedDevices <= 0 || !firmwareRestartRecoveryPending.compareAndSet(false, true)) {
+            return
+        }
+        HostDiagnostics.log(
+            this,
+            "firmware restart recovery scheduled expectedDevices=$expectedDevices"
+        )
+        hostExecutor.execute {
+            try {
+                // Klippy deliberately returned before Android's physical USB
+                // sessions are rebuilt. At this point there is no live print to
+                // preserve: FIRMWARE_RESTART has already ended the Klippy runtime.
+                sessions.forEach { runCatching { it.close() } }
+                sessions.clear()
+                Thread.sleep(FIRMWARE_REENUM_SETTLE_MS)
+
+                val deadline = SystemClock.elapsedRealtime() + FIRMWARE_REENUM_TIMEOUT_MS
+                var supported = usbManager.deviceList.values
+                    .filter { UsbDeviceScanner.isSupported(it) }
+                while (supported.size < expectedDevices && SystemClock.elapsedRealtime() < deadline) {
+                    Thread.sleep(FIRMWARE_REENUM_POLL_MS)
+                    supported = usbManager.deviceList.values
+                        .filter { UsbDeviceScanner.isSupported(it) }
+                }
+
+                if (supported.size < expectedDevices) {
+                    HostDiagnostics.log(
+                        this,
+                        "firmware restart recovery incomplete devices=${supported.size}/$expectedDevices"
+                    )
+                    publishStatus(
+                        "Firmware restart needs attention: only ${supported.size}/$expectedDevices MCU USB devices returned."
+                    )
+                    return@execute
+                }
+
+                val missingPermission = supported.firstOrNull { !usbManager.hasPermission(it) }
+                if (missingPermission != null) {
+                    HostDiagnostics.log(
+                        this,
+                        "firmware restart recovery requesting renewed USB permission"
+                    )
+                    getSharedPreferences("usb_permission_mode", Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(EXTRA_FULL_SMOKE, false)
+                        .putBoolean(EXTRA_REAL_CONFIG, true)
+                        .apply()
+                    publishStatus("Firmware restart: waiting for renewed USB permission?")
+                    UsbPermissionReceiver.requestNext(
+                        this, usbManager, missingPermission, fullSmoke = false, realConfig = true
+                    )
+                    return@execute
+                }
+
+                if (!servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)) {
+                    HostDiagnostics.log(this, "firmware restart recovery cancelled: host no longer desired")
+                    return@execute
+                }
+
+                HostDiagnostics.log(
+                    this,
+                    "firmware restart recovery rebinding ${supported.size} MCU USB devices"
+                )
+                // Direct recovery bypasses onStartCommand(), so explicitly re-arm
+                // the duplicate-start guard before launching the replacement host.
+                persistentHostActive.set(true)
+                rebuildSessions(fullSmoke = false, realConfig = true)
+            } catch (t: Throwable) {
+                HostDiagnostics.log(
+                    this,
+                    "firmware restart recovery ERROR ${t.javaClass.simpleName}: ${t.message}"
+                )
+                publishStatus(
+                    "Firmware restart recovery ERROR ${t.javaClass.simpleName}: ${t.message}"
+                )
+            } finally {
+                firmwareRestartRecoveryPending.set(false)
+            }
+        }
     }
 
     // These are Android USB bridge counters, not Klipper MCU retransmit counters.
@@ -575,6 +673,9 @@ class KlipperHostService : Service() {
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
         private const val USB_REOPEN_SETTLE_MS = 250L
+        private const val FIRMWARE_REENUM_SETTLE_MS = 500L
+        private const val FIRMWARE_REENUM_TIMEOUT_MS = 15_000L
+        private const val FIRMWARE_REENUM_POLL_MS = 100L
 
         fun start(
             context: Context,

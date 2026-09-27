@@ -28,6 +28,30 @@ def probe_c_helper(path):
     return "c_helper OK"
 
 
+def get_klipper_version():
+    """Return the exact pinned Klipper revision bundled in this APK."""
+    import os
+    vendor_dir = os.path.join(os.path.dirname(__file__), "klipper_vendor")
+    for filename in ("KLIPPER_VERSION", "KLIPPER_COMMIT"):
+        version_path = os.path.join(vendor_dir, filename)
+        try:
+            with open(version_path, "r", encoding="utf-8") as version_file:
+                version = version_file.read().strip()
+            if version:
+                return version
+        except OSError:
+            pass
+    return "unknown"
+
+
+def probe_klipper_version():
+    """Human-readable pinned engine version for Android host diagnostics."""
+    return (
+        "Klipper engine: %s (pinned; MCU protocol compatibility is checked at connect)"
+        % get_klipper_version()
+    )
+
+
 def probe_klipper_import():
     """Import Klipper core host modules without connecting to a printer."""
     _klippy_path()
@@ -92,7 +116,10 @@ def probe_mcu_identify(path, c_helper_path, baud=115200):
 
     if "error" in result:
         raise RuntimeError(result["error"])
-    return "Klipper identify OK: MCU={mcu}, {commands} commands, {version}".format(**result)
+    return (
+        "Klipper identify OK: MCU={mcu}, {commands} commands, "
+        "firmware={version}, build={build} (identified; final protocol compatibility checked when Klippy reaches ready)"
+    ).format(**result)
 
 
 def probe_full_klippy(pty_paths, c_helper_path, work_dir):
@@ -137,7 +164,7 @@ def probe_full_klippy(pty_paths, c_helper_path, work_dir):
         "apiserver": None,
         "start_reason": "startup",
         "gcode_fd": read_fd,
-        "software_version": "androidklipper-smoke",
+        "software_version": get_klipper_version(),
     }
     printer = klippy.Printer(r, None, start_args)
     result = {}
@@ -345,7 +372,7 @@ def probe_real_config_from_moonraker(base_url, stable_mapping, c_helper_path, wo
         "apiserver": None,
         "start_reason": "startup",
         "gcode_fd": read_fd,
-        "software_version": "androidklipper-real-config",
+        "software_version": get_klipper_version(),
     }
     printer = klippy.Printer(r, None, start_args)
     result = {}

@@ -57,8 +57,20 @@ if len(sys.argv) >= 4:
     if trsync_needle not in mcu_text:
         raise SystemExit(
             "Klipper trsync timeout patch point changed; inspect upstream before updating the pin")
-    mcu_path.write_text(
-        mcu_text.replace(trsync_needle, trsync_replacement, 1))
+    mcu_text = mcu_text.replace(trsync_needle, trsync_replacement, 1)
+
+    # Android can occasionally be descheduled far longer than a Pi. Give
+    # async MCU commands (LED/output pin/PWM helpers) more runway as well as
+    # the normal motion queue so a brief host pause does not become a late
+    # command at the MCU. Keep this comfortably below Klipper's 3s nominal
+    # scheduling horizon.
+    schedule_needle = "MIN_SCHEDULE_TIME = 0.100"
+    schedule_replacement = "MIN_SCHEDULE_TIME = 0.250"
+    if schedule_needle not in mcu_text:
+        raise SystemExit(
+            "Klipper min schedule patch point changed; inspect upstream before updating the pin")
+    mcu_text = mcu_text.replace(schedule_needle, schedule_replacement, 1)
+    mcu_path.write_text(mcu_text)
 
 
 if len(sys.argv) >= 5:
@@ -145,3 +157,25 @@ if len(sys.argv) >= 9:
             "Klippy webhooks hostname patch point changed; inspect upstream before updating the pin")
     webhooks_path.write_text(
         webhooks_text.replace(hostname_needle, hostname_replacement, 1))
+
+
+if len(sys.argv) >= 10:
+    toolhead_path = Path(sys.argv[9])
+    toolhead_text = toolhead_path.read_text()
+    queue_needle = """BUFFER_TIME_HIGH = 1.0
+BUFFER_TIME_START = 0.250
+PRIMING_CMD_TIME = 0.100
+"""
+    queue_replacement = """# Android hosts can see scheduler pauses that are unusual on a dedicated Pi.
+# Keep substantially more already-timestamped motion queued on the MCUs so a
+# sub-second Android scheduling hiccup is absorbed instead of becoming a
+# 'Timer too close' shutdown. Klipper's nominal future-scheduling limit is 3s.
+BUFFER_TIME_HIGH = 2.0
+BUFFER_TIME_START = 0.750
+PRIMING_CMD_TIME = 0.100
+"""
+    if queue_needle not in toolhead_text:
+        raise SystemExit(
+            "Klippy toolhead queue patch point changed; inspect upstream before updating the pin")
+    toolhead_path.write_text(
+        toolhead_text.replace(queue_needle, queue_replacement, 1))

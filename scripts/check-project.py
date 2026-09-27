@@ -124,7 +124,7 @@ assert "START_NOT_STICKY" in host_service
 assert "START_STICKY" in host_service
 assert "persistentHostActive" in host_service
 assert "HostDiagnostics.log" in host_service
-assert "THREAD_PRIORITY_URGENT_DISPLAY" in host_service
+assert "THREAD_PRIORITY_URGENT_AUDIO" in host_service
 assert "Only arm a PTY for full/real Klippy after the MCU has" in host_service
 assert "KEY_AUTO_START_USB" in host_service
 assert "KEY_AUTO_KIOSK_PENDING" in host_service
@@ -283,5 +283,50 @@ assert "moonraker-tail.log" in checkpoint_capture
 diagnostics = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/HostDiagnostics.kt").read_text()
 assert "getHistoricalProcessExitReasons" in diagnostics
 assert "androidklipper-host.log" in diagnostics
+
+# Android reliability invariants. These are intentionally explicit because
+# timing and lifecycle regressions can look like random MCU/USB failures.
+usb_session = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt").read_text()
+assert "maxWriteTransferUs" in usb_session
+assert "val packetSize = endpoint.maxPacketSize" not in usb_session
+assert "WRITE_ATTEMPT_TIMEOUT_MS = 25" in usb_session
+assert "THREAD_PRIORITY_URGENT_AUDIO" in host_service
+assert "scheduleFirmwareRestartRecovery" in host_service
+assert "persistentHostActive.set(true)" in host_service
+assert "firmware restart recovery cancelled: host no longer desired" in host_service
+assert "usb_rebind_required: firmware_restart" in persistent
+assert "AndroidKlipper reactor timer late" in persistent
+assert "final protocol compatibility checked when Klippy reaches ready" in (root / "app/src/main/python/hostprobe.py").read_text()
+assert "FIRMWARE_REENUM_TIMEOUT_MS = 15_000L" in host_service
+assert "source.copyOfRange(offset, length)" not in usb_session
+hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
+assert "probe_klipper_version" in hostprobe
+assert "def get_klipper_version" in hostprobe
+assert '"software_version": get_klipper_version()' in hostprobe
+assert '"software_version": get_klipper_version()' in persistent
+assert '"androidklipper-persistent"' not in persistent
+assert '"androidklipper-smoke"' not in hostprobe
+assert '"androidklipper-real-config"' not in hostprobe
+assert hostprobe.count('"software_version": get_klipper_version()') >= 2
+assert 'first_line == "MCU Protocol error"' in persistent
+
+klipper_patch = (root / "scripts/patch-klipper.py").read_text()
+assert 'schedule_replacement = "MIN_SCHEDULE_TIME = 0.250"' in klipper_patch
+assert "BUFFER_TIME_HIGH = 2.0" in klipper_patch
+assert "BUFFER_TIME_START = 0.750" in klipper_patch
+assert "KLIPPER_VERSION" in (root / "scripts/vendor-klipper.sh").read_text()
+
+# When the vendor step has run (always true in CI), verify the generated Klipper
+# tree rather than trusting the patch script alone.
+vendored = root / "app/src/main/python/klipper_vendor"
+if vendored.exists():
+    mcu_text = (vendored / "klippy/mcu.py").read_text()
+    toolhead_text = (vendored / "klippy/toolhead.py").read_text()
+    assert "MIN_SCHEDULE_TIME = 0.250" in mcu_text
+    assert "TRSYNC_TIMEOUT = 0.050" in mcu_text
+    assert "BUFFER_TIME_HIGH = 2.0" in toolhead_text
+    assert "BUFFER_TIME_START = 0.750" in toolhead_text
+    assert (vendored / "KLIPPER_COMMIT").read_text().strip() == "2d7717e3b62ea2fe3401b27f54f8681f80451c69"
+    assert (vendored / "KLIPPER_VERSION").read_text().strip() == "v0.13.0-756-g2d7717e3"
 
 print("project invariants: PASS")
