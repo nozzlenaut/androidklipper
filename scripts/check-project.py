@@ -249,6 +249,25 @@ assert '"hostname": "$hostname"' in mainsail_server
 assert '"port": 7125' in mainsail_server
 assert (root / "app/src/main/assets/mainsail/index.html").exists()
 assert (root / "app/src/main/assets/mainsail/sw.js").exists()
+assert "/androidklipper/battery" in mainsail_server
+assert "Intent.ACTION_BATTERY_CHANGED" in mainsail_server
+assert "BatteryManager.EXTRA_PRESENT" in mainsail_server
+assert '"level": ${level?.toString() ?: "null"}' in mainsail_server
+assert "BatteryManager.BATTERY_STATUS_CHARGING" in mainsail_server
+mainsail_version = (root / "app/src/main/assets/mainsail/.version").read_text().strip()
+assert mainsail_version == "v2.19.0-androidklipper-battery1"
+mainsail_main_files = list((root / "app/src/main/assets/mainsail/assets").glob("index-*.js"))
+assert len(mainsail_main_files) == 1
+mainsail_main = mainsail_main_files[0].read_text(errors="ignore")
+assert "/androidklipper/battery" in mainsail_main
+assert "androidklipper-battery" in mainsail_main
+assert "Android Battery" in mainsail_main
+assert "Percent [%]" in mainsail_main
+vendor_mainsail = (root / "scripts/vendor-mainsail.sh").read_text()
+assert "5fb9e77fb9f4e60cf0725d9dc7f57cf7b84bbd70" in vendor_mainsail
+mainsail_patch = (root / "scripts/patch-mainsail.py").read_text()
+assert "androidklipper-battery" in mainsail_patch
+assert "Percent [%]" in mainsail_patch
 assert "prepareGcodeStorage" in host_service
 assert "Environment.isExternalStorageRemovable" in host_service
 assert "Os.symlink" in host_service
