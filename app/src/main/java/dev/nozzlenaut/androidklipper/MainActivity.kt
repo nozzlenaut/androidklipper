@@ -131,17 +131,8 @@ class MainActivity : Activity() {
         root.addView(stop)
         setContentView(ScrollView(this).apply { addView(root) })
 
-        val runtimePermissions = mutableListOf<String>()
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            runtimePermissions += Manifest.permission.CAMERA
-        }
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            runtimePermissions += Manifest.permission.POST_NOTIFICATIONS
-        }
-        if (runtimePermissions.isNotEmpty()) {
-            requestPermissions(runtimePermissions.toTypedArray(), 44)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 44)
         }
         if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
             handleUsbAttach()

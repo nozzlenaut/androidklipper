@@ -5,26 +5,20 @@ import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.hardware.usb.UsbDevice
-import com.jiangdg.ausbc.MultiCameraClient
-import com.jiangdg.ausbc.camera.CameraUVC
-import com.jiangdg.ausbc.camera.bean.CameraRequest
-import com.jiangdg.ausbc.callback.ICameraStateCallBack
-import com.jiangdg.ausbc.callback.IDeviceConnectCallBack
-import com.jiangdg.ausbc.callback.IPreviewDataCallBack
-import com.jiangdg.usb.USBMonitor
+import com.serenegiant.usb.IFrameCallback
+import com.serenegiant.usb.USBMonitor
+import com.serenegiant.usb.UVCCamera
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Owns one USB UVC camera and exposes it as a local MJPEG stream for Mainsail.
- * This intentionally stays independent from Klipper's serial USB sessions.
- */
+/** Owns one USB UVC camera and exposes it as MJPEG for Mainsail. */
 class CameraBridge(
     private val context: Context,
     private val report: (String) -> Unit = {}
@@ -35,110 +29,58 @@ class CameraBridge(
     private val frameSequence = AtomicLong(0)
     private val lastEncodeAtMs = AtomicLong(0)
     private val encoding = AtomicBoolean(false)
-    private val requestingPermission = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
+    private val requestingPermission = AtomicBoolean(false)
+    private val cameraLock = Any()
     private val encoder = Executors.newSingleThreadExecutor { task ->
         Thread(task, "androidklipper-camera-jpeg").apply { isDaemon = true }
     }
-    private val cameras = linkedMapOf<Int, MultiCameraClient.ICamera>()
     private val server = CameraHttpServer(CAMERA_PORT)
 
-    @Volatile
-    private var cameraClient: MultiCameraClient? = null
+    @Volatile private var monitor: USBMonitor? = null
+    @Volatile private var camera: UVCCamera? = null
+    @Volatile private var activeDevice: UsbDevice? = null
+    @Volatile private var frameWidth = PREVIEW_WIDTH
+    @Volatile private var frameHeight = PREVIEW_HEIGHT
+    @Volatile private var bridgeState = "stopped"
 
-    @Volatile
-    private var activeCamera: MultiCameraClient.ICamera? = null
-
-    @Volatile
-    private var bridgeState = "stopped"
-
-    private val cameraRequest = CameraRequest.Builder()
-        .setPreviewWidth(PREVIEW_WIDTH)
-        .setPreviewHeight(PREVIEW_HEIGHT)
-        .setRenderMode(CameraRequest.RenderMode.OPENGL)
-        .setRawPreviewData(true)
-        .setCaptureRawImage(false)
-        .setAudioSource(CameraRequest.AudioSource.NONE)
-        .create()
-    private val previewCallback = object : IPreviewDataCallBack {
-        override fun onPreviewData(
-            data: ByteArray?,
-            width: Int,
-            height: Int,
-            format: IPreviewDataCallBack.DataFormat
-        ) {
-            if (data == null || format != IPreviewDataCallBack.DataFormat.NV21) return
-            val now = System.currentTimeMillis()
-            val previous = lastEncodeAtMs.get()
-            if (now - previous < FRAME_INTERVAL_MS) return
-            if (!lastEncodeAtMs.compareAndSet(previous, now)) return
-            if (!encoding.compareAndSet(false, true)) return
-
-            val copy = data.copyOf()
-            runCatching {
-                encoder.execute {
-                    try {
-                        val output = ByteArrayOutputStream(width * height / 3)
-                        val image = YuvImage(copy, ImageFormat.NV21, width, height, null)
-                        if (image.compressToJpeg(Rect(0, 0, width, height), JPEG_QUALITY, output)) {
-                            latestFrame.set(Frame(frameSequence.incrementAndGet(), output.toByteArray()))
-                            bridgeState = "streaming"
-                        }
-                    } catch (t: Throwable) {
-                        report("JPEG encode failed: ${t.javaClass.simpleName}: ${t.message}")
-                    } finally {
-                        encoding.set(false)
-                    }
-                }
-            }.onFailure { encoding.set(false) }
-        }
+    private val frameCallback = IFrameCallback { buffer ->
+        acceptFrame(buffer)
     }
-    private val cameraStateCallback = object : ICameraStateCallBack {
-        override fun onCameraState(
-            self: MultiCameraClient.ICamera,
-            code: ICameraStateCallBack.State,
-            msg: String?
-        ) {
-            bridgeState = when (code) {
-                ICameraStateCallBack.State.OPENED -> "camera-open"
-                ICameraStateCallBack.State.CLOSED -> "camera-closed"
-                ICameraStateCallBack.State.ERROR -> "camera-error"
-            }
-            report("UVC state=$code${msg?.let { ": $it" } ?: ""}")
-        }
-    }
-
-    private val deviceCallback = object : IDeviceConnectCallBack {
-        override fun onAttachDev(device: UsbDevice?) {
-            device ?: return
+    private val deviceListener = object : USBMonitor.OnDeviceConnectListener {
+        override fun onAttach(device: UsbDevice) {
             if (!isUvcCamera(device)) return
             report("UVC attached: ${describe(device)}")
-            ensureCamera(device)
-            requestCameraPermission(device)
+            requestPermission(device)
         }
 
-        override fun onDetachDec(device: UsbDevice?) {
-            device ?: return
-            report("UVC detached: ${describe(device)}")
-            removeCamera(device)
+        override fun onDettach(device: UsbDevice) {
+            if (activeDevice?.deviceId == device.deviceId) {
+                report("UVC detached: ${describe(device)}")
+                stopCamera("waiting-for-camera")
+            }
         }
 
-        override fun onConnectDev(device: UsbDevice?, ctrlBlock: USBMonitor.UsbControlBlock?) {
-            if (device == null || ctrlBlock == null || !isUvcCamera(device)) return
+        override fun onConnect(
+            device: UsbDevice,
+            ctrlBlock: USBMonitor.UsbControlBlock,
+            createNew: Boolean
+        ) {
+            if (!isUvcCamera(device)) return
             requestingPermission.set(false)
             openCamera(device, ctrlBlock)
         }
-        override fun onDisConnectDec(device: UsbDevice?, ctrlBlock: USBMonitor.UsbControlBlock?) {
-            device ?: return
-            requestingPermission.set(false)
-            report("UVC disconnected: ${describe(device)}")
-            removeCamera(device)
+        override fun onDisconnect(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
+            if (activeDevice?.deviceId == device.deviceId) {
+                report("UVC disconnected: ${describe(device)}")
+                stopCamera("waiting-for-camera")
+            }
         }
 
-        override fun onCancelDev(device: UsbDevice?) {
+        override fun onCancel(device: UsbDevice) {
             requestingPermission.set(false)
             bridgeState = "permission-denied"
-            report("UVC permission denied: ${device?.let(::describe) ?: "unknown device"}")
+            report("UVC permission denied: ${describe(device)}")
         }
     }
 
@@ -147,112 +89,192 @@ class CameraBridge(
         bridgeState = "starting"
         try {
             server.start(SOCKET_READ_TIMEOUT, false)
-            val client = MultiCameraClient(context, deviceCallback)
-            cameraClient = client
-            client.openDebug(false)
-            client.register()
+            val usbMonitor = USBMonitor(context, deviceListener)
+            monitor = usbMonitor
+            usbMonitor.register()
             bridgeState = "waiting-for-camera"
             report("camera server listening on :$CAMERA_PORT")
-
-            client.getDeviceList()
-                ?.firstOrNull(::isUvcCamera)
-                ?.let { device ->
-                    ensureCamera(device)
-                    requestCameraPermission(device)
-                }
+            usbMonitor.getDeviceList()
+                .firstOrNull(::isUvcCamera)
+                ?.let(::requestPermission)
         } catch (t: Throwable) {
             bridgeState = "start-error"
             started.set(false)
-            runCatching { cameraClient?.unRegister() }
-            runCatching { cameraClient?.destroy() }
-            cameraClient = null
+            runCatching { monitor?.unregister() }
+            runCatching { monitor?.destroy() }
+            monitor = null
             runCatching { server.stop() }
             throw t
         }
     }
-    private fun ensureCamera(device: UsbDevice): MultiCameraClient.ICamera {
-        synchronized(cameras) {
-            return cameras.getOrPut(device.deviceId) {
-                CameraUVC(context, device).apply {
-                    setCameraStateCallBack(cameraStateCallback)
-                    addPreviewDataCallBack(previewCallback)
-                }
-            }
-        }
-    }
 
-    private fun requestCameraPermission(device: UsbDevice) {
-        if (activeCamera?.getUsbDevice()?.deviceId == device.deviceId) return
+    private fun requestPermission(device: UsbDevice) {
+        if (activeDevice?.deviceId == device.deviceId) return
         if (!requestingPermission.compareAndSet(false, true)) return
         bridgeState = "requesting-usb-permission"
-        if (cameraClient?.requestPermission(device) != true) {
+        val failed = runCatching { monitor?.requestPermission(device) ?: true }.getOrDefault(true)
+        if (failed) {
             requestingPermission.set(false)
             bridgeState = "permission-request-failed"
             report("could not request UVC permission for ${describe(device)}")
         }
     }
-
     private fun openCamera(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
-        val current = activeCamera
-        if (current != null && current.getUsbDevice().deviceId != device.deviceId) {
-            report("ignoring extra UVC camera ${describe(device)}")
-            return
+        synchronized(cameraLock) {
+            val current = activeDevice
+            if (current != null && current.deviceId != device.deviceId) {
+                report("ignoring extra UVC camera ${describe(device)}")
+                return
+            }
+            stopCameraLocked("opening-camera")
+            bridgeState = "opening-camera"
+            latestFrame.set(null)
+
+            val uvc = UVCCamera()
+            try {
+                uvc.open(ctrlBlock)
+                configurePreview(uvc)
+                uvc.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_NV21)
+                uvc.startPreview()
+                camera = uvc
+                activeDevice = device
+                bridgeState = "camera-open"
+                report("opened ${describe(device)} at ${frameWidth}x$frameHeight MJPEG")
+            } catch (t: Throwable) {
+                runCatching { uvc.destroy() }
+                bridgeState = "camera-error"
+                report("UVC open failed: ${t.javaClass.simpleName}: ${t.message}")
+            }
         }
-        val camera = ensureCamera(device)
-        camera.setUsbControlBlock(ctrlBlock)
-        activeCamera = camera
-        latestFrame.set(null)
-        bridgeState = "opening-camera"
-        report("opening ${describe(device)} at ${PREVIEW_WIDTH}x$PREVIEW_HEIGHT")
-        camera.openCamera<Any>(null, cameraRequest)
+    }
+    private fun configurePreview(uvc: UVCCamera) {
+        val profiles = listOf(
+            PreviewProfile(640, 360, UVCCamera.FRAME_FORMAT_MJPEG, "MJPEG"),
+            PreviewProfile(640, 480, UVCCamera.FRAME_FORMAT_MJPEG, "MJPEG"),
+            PreviewProfile(640, 480, UVCCamera.FRAME_FORMAT_YUYV, "YUYV")
+        )
+        var lastFailure: Throwable? = null
+        for (profile in profiles) {
+            try {
+                uvc.setPreviewSize(
+                    profile.width,
+                    profile.height,
+                    MIN_CAMERA_FPS,
+                    MAX_CAMERA_FPS,
+                    profile.format,
+                    UVCCamera.DEFAULT_BANDWIDTH
+                )
+                frameWidth = profile.width
+                frameHeight = profile.height
+                report("UVC profile ${profile.label} ${profile.width}x${profile.height}")
+                return
+            } catch (t: Throwable) {
+                lastFailure = t
+            }
+        }
+        throw IllegalStateException("no supported UVC preview profile", lastFailure)
     }
 
-    private fun removeCamera(device: UsbDevice) {
-        val camera = synchronized(cameras) { cameras.remove(device.deviceId) }
-        if (camera != null) {
-            runCatching { camera.removePreviewDataCallBack(previewCallback) }
-            runCatching { camera.closeCamera() }
+    private data class PreviewProfile(
+        val width: Int,
+        val height: Int,
+        val format: Int,
+        val label: String
+    )
+    private fun acceptFrame(buffer: ByteBuffer?) {
+        buffer ?: return
+        val width = frameWidth
+        val height = frameHeight
+        val expected = width * height * 3 / 2
+        val now = System.currentTimeMillis()
+        val previous = lastEncodeAtMs.get()
+        if (now - previous < FRAME_INTERVAL_MS) return
+        if (!lastEncodeAtMs.compareAndSet(previous, now)) return
+        if (!encoding.compareAndSet(false, true)) return
+
+        val copy = try {
+            val duplicate = buffer.duplicate()
+            duplicate.rewind()
+            if (duplicate.remaining() < expected) {
+                encoding.set(false)
+                return
+            }
+            ByteArray(expected).also { duplicate.get(it) }
+        } catch (t: Throwable) {
+            encoding.set(false)
+            report("frame copy failed: ${t.javaClass.simpleName}: ${t.message}")
+            return
         }
-        if (activeCamera?.getUsbDevice()?.deviceId == device.deviceId) {
-            activeCamera = null
-            latestFrame.set(null)
-            bridgeState = "waiting-for-camera"
+
+        encodeFrame(copy, width, height)
+    }
+    private fun encodeFrame(bytes: ByteArray, width: Int, height: Int) {
+        runCatching {
+            encoder.execute {
+                try {
+                    val output = ByteArrayOutputStream(width * height / 3)
+                    val image = YuvImage(bytes, ImageFormat.NV21, width, height, null)
+                    if (image.compressToJpeg(Rect(0, 0, width, height), JPEG_QUALITY, output)) {
+                        latestFrame.set(
+                            Frame(frameSequence.incrementAndGet(), output.toByteArray())
+                        )
+                        bridgeState = "streaming"
+                    }
+                } catch (t: Throwable) {
+                    report("JPEG encode failed: ${t.javaClass.simpleName}: ${t.message}")
+                } finally {
+                    encoding.set(false)
+                }
+            }
+        }.onFailure {
+            encoding.set(false)
+            report("JPEG queue failed: ${it.javaClass.simpleName}: ${it.message}")
         }
+    }
+
+    private fun stopCamera(nextState: String) {
+        synchronized(cameraLock) {
+            stopCameraLocked(nextState)
+        }
+    }
+    private fun stopCameraLocked(nextState: String) {
+        val current = camera
+        camera = null
+        activeDevice = null
+        latestFrame.set(null)
+        if (current != null) {
+            runCatching { current.setFrameCallback(null, 0) }
+            runCatching { current.stopPreview() }
+            runCatching { current.destroy() }
+        }
+        bridgeState = nextState
     }
 
     fun close() {
         if (!started.compareAndSet(true, false)) return
         bridgeState = "stopping"
-        synchronized(cameras) {
-            cameras.values.toList().forEach { camera ->
-                runCatching { camera.removePreviewDataCallBack(previewCallback) }
-                runCatching { camera.closeCamera() }
-            }
-            cameras.clear()
+        stopCamera("stopping")
+        monitor?.let { usbMonitor ->
+            runCatching { usbMonitor.unregister() }
+            runCatching { usbMonitor.destroy() }
         }
-        activeCamera = null
-        latestFrame.set(null)
-        cameraClient?.let { client ->
-            runCatching { client.unRegister() }
-            runCatching { client.destroy() }
-        }
-        cameraClient = null
+        monitor = null
+        requestingPermission.set(false)
         runCatching { server.stop() }
         encoder.shutdownNow()
         bridgeState = "stopped"
         report("camera bridge stopped")
     }
 
-    private fun isUvcCamera(device: UsbDevice): Boolean {
-        return (0 until device.interfaceCount).any { index ->
+    private fun isUvcCamera(device: UsbDevice): Boolean =
+        (0 until device.interfaceCount).any { index ->
             device.getInterface(index).interfaceClass == USB_VIDEO_CLASS
         }
-    }
-
     private fun describe(device: UsbDevice): String =
         "${device.productName ?: device.deviceName} " +
             "${device.vendorId.toString(16).padStart(4, '0')}:" +
             device.productId.toString(16).padStart(4, '0')
+
     private inner class CameraHttpServer(port: Int) : NanoHTTPD(port) {
         override fun serve(session: IHTTPSession): Response {
             val path = session.uri?.substringBefore('?') ?: "/"
@@ -273,9 +295,10 @@ class CameraBridge(
 
         private fun statusResponse(): Response {
             val frame = latestFrame.get()
-            val camera = activeCamera?.getUsbDevice()?.productName ?: "none"
+            val cameraName = activeDevice?.productName ?: "none"
+            val safeName = cameraName.replace("\\", "\\\\").replace("\"", "\\\"")
             val body = """
-                {"state":"$bridgeState","camera":"$camera","frame_id":${frame?.id ?: 0}}
+                {"state":"$bridgeState","camera":"$safeName","frame_id":${frame?.id ?: 0}}
             """.trimIndent()
             return newFixedLengthResponse(Response.Status.OK, "application/json", body)
         }
@@ -293,20 +316,17 @@ class CameraBridge(
                 frame.jpeg.size.toLong()
             )
         }
-        private fun streamResponse(): Response {
-            return newChunkedResponse(
-                Response.Status.OK,
-                "multipart/x-mixed-replace; boundary=frame",
-                MjpegInputStream { latestFrame.get() }
-            )
-        }
-    }
 
+        private fun streamResponse(): Response = newChunkedResponse(
+            Response.Status.OK,
+            "multipart/x-mixed-replace; boundary=frame",
+            MjpegInputStream { latestFrame.get() }
+        )
+    }
     private class MjpegInputStream(
         private val provider: () -> Frame?
     ) : InputStream() {
-        @Volatile
-        private var closed = false
+        @Volatile private var closed = false
         private var current = ByteArrayInputStream(ByteArray(0))
         private var lastFrameId = -1L
 
@@ -337,6 +357,7 @@ class CameraBridge(
             }
             return -1
         }
+
         override fun close() {
             closed = true
             current.close()
@@ -357,13 +378,14 @@ class CameraBridge(
             }
         }
     }
-
     companion object {
         const val CAMERA_PORT = 8082
         const val STREAM_PATH = "/stream.mjpg"
         const val SNAPSHOT_PATH = "/snapshot.jpg"
         private const val PREVIEW_WIDTH = 640
         private const val PREVIEW_HEIGHT = 360
+        private const val MIN_CAMERA_FPS = 5
+        private const val MAX_CAMERA_FPS = 15
         private const val JPEG_QUALITY = 75
         private const val FRAME_INTERVAL_MS = 100L
         private const val STREAM_POLL_MS = 25L
