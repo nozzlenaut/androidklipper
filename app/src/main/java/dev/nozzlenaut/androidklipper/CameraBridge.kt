@@ -88,7 +88,7 @@ class CameraBridge(
         if (!started.compareAndSet(false, true)) return
         bridgeState = "starting"
         try {
-            server.start(SOCKET_READ_TIMEOUT, false)
+            server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             val usbMonitor = USBMonitor(context, deviceListener)
             monitor = usbMonitor
             usbMonitor.register()
