@@ -60,6 +60,10 @@ class KlipperHostService : Service() {
     }
     private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
     private val mainsailServer by lazy { MainsailServer(this) }
+    private val cameraBridge by lazy {
+        CameraBridge(this) { message -> HostDiagnostics.log(this, "camera: $message") }
+    }
+    private val cameraBridgeStarted = AtomicBoolean(false)
     private var hostWakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -93,6 +97,16 @@ class KlipperHostService : Service() {
             else -> "Starting USB host test…"
         }
         startForeground(NOTIFICATION_ID, notification(startText))
+        if (!cameraBridgeStarted.get()) {
+            runCatching { cameraBridge.start() }
+                .onSuccess { cameraBridgeStarted.set(true) }
+                .onFailure {
+                    HostDiagnostics.log(
+                        this,
+                        "camera bridge start ERROR ${it.javaClass.simpleName}: ${it.message}"
+                    )
+                }
+        }
         if (realConfig) acquireHostWakeLock()
 
         // A second USB attach/permission callback must never tear down a live print.
@@ -651,6 +665,9 @@ class KlipperHostService : Service() {
         klippyExecutor.shutdownNow()
         statusServer.close()
         runCatching { mainsailServer.stop() }
+        if (cameraBridgeStarted.getAndSet(false)) {
+            runCatching { cameraBridge.close() }
+        }
         releaseHostWakeLock()
         HostDiagnostics.log(this, "service onDestroy end")
         super.onDestroy()
