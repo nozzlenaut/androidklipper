@@ -13,7 +13,20 @@ class UsbPermissionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_USB_PERMISSION) return
         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-        HostDiagnostics.log(context, "USB permission callback granted=$granted")
+        val cameraPermission = intent.getBooleanExtra(EXTRA_CAMERA_PERMISSION, false)
+        HostDiagnostics.log(
+            context,
+            "USB permission callback granted=$granted camera=$cameraPermission"
+        )
+        if (cameraPermission) {
+            if (granted) {
+                HostDiagnostics.log(context, "USB camera permission granted; retrying camera bridge")
+                KlipperHostService.retryCamera(context)
+            } else {
+                HostDiagnostics.log(context, "USB camera permission denied")
+            }
+            return
+        }
         if (!granted) {
             context.getSharedPreferences(
                 KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE
@@ -58,6 +71,25 @@ class UsbPermissionReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_USB_PERMISSION = "dev.nozzlenaut.androidklipper.USB_PERMISSION"
+        private const val EXTRA_CAMERA_PERMISSION = "camera_permission"
+
+        fun requestCamera(
+            context: Context,
+            manager: UsbManager,
+            device: UsbDevice
+        ) {
+            val callback = Intent(context, UsbPermissionReceiver::class.java).apply {
+                action = ACTION_USB_PERMISSION
+                putExtra(EXTRA_CAMERA_PERMISSION, true)
+            }
+            val pending = PendingIntent.getBroadcast(
+                context,
+                2000 + (device.deviceId and 0x3fffffff),
+                callback,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            )
+            manager.requestPermission(device, pending)
+        }
 
         fun requestNext(
             context: Context,

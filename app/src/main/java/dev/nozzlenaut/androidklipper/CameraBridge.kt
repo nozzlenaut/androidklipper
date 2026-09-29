@@ -5,6 +5,7 @@ import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import com.serenegiant.usb.IFrameCallback
 import com.serenegiant.usb.USBMonitor
 import com.serenegiant.usb.UVCCamera
@@ -110,14 +111,38 @@ class CameraBridge(
 
     private fun requestPermission(device: UsbDevice) {
         if (activeDevice?.deviceId == device.deviceId) return
+        val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        if (!manager.hasPermission(device)) {
+            requestingPermission.set(false)
+            bridgeState = "permission-required"
+            report("UVC permission required for ${describe(device)}")
+            return
+        }
         if (!requestingPermission.compareAndSet(false, true)) return
-        bridgeState = "requesting-usb-permission"
+        bridgeState = "opening-camera"
         val failed = runCatching { monitor?.requestPermission(device) ?: true }.getOrDefault(true)
         if (failed) {
             requestingPermission.set(false)
             bridgeState = "permission-request-failed"
-            report("could not request UVC permission for ${describe(device)}")
+            report("could not open permitted UVC device ${describe(device)}")
         }
+    }
+
+    fun retryGrantedCamera() {
+        requestingPermission.set(false)
+        val usbMonitor = monitor
+        if (usbMonitor == null) {
+            bridgeState = "waiting-for-camera"
+            report("camera retry requested before USB monitor was ready")
+            return
+        }
+        val device = usbMonitor.getDeviceList().firstOrNull(::isUvcCamera)
+        if (device == null) {
+            bridgeState = "waiting-for-camera"
+            report("camera retry requested but no UVC camera is attached")
+            return
+        }
+        requestPermission(device)
     }
     private fun openCamera(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
         synchronized(cameraLock) {
