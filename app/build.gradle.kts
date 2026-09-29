@@ -92,7 +92,7 @@ chaquopy {
 
 dependencies {
     implementation("com.github.mik3y:usb-serial-for-android:3.11.0")
-    implementation("org.uvccamera:lib:0.1.0")
+    implementation(project(":uvccamera"))
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     testImplementation("junit:junit:4.13.2")
 }

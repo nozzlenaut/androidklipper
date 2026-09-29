@@ -17,3 +17,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "AndroidKlipper"
 include(":app")
+include(":uvccamera")
+project(":uvccamera").projectDir = file("third_party/uvccamera")
