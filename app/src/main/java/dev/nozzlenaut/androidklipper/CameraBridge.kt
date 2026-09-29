@@ -3,7 +3,9 @@ package dev.nozzlenaut.androidklipper
 import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
+import android.graphics.SurfaceTexture
 import android.graphics.YuvImage
+import android.os.Build
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import com.serenegiant.usb.IFrameCallback
@@ -40,6 +42,7 @@ class CameraBridge(
 
     @Volatile private var monitor: USBMonitor? = null
     @Volatile private var camera: UVCCamera? = null
+    @Volatile private var previewTexture: SurfaceTexture? = null
     @Volatile private var activeDevice: UsbDevice? = null
     @Volatile private var frameWidth = PREVIEW_WIDTH
     @Volatile private var frameHeight = PREVIEW_HEIGHT
@@ -156,16 +159,27 @@ class CameraBridge(
             latestFrame.set(null)
 
             val uvc = UVCCamera()
+            var texture: SurfaceTexture? = null
             try {
                 uvc.open(ctrlBlock)
                 configurePreview(uvc)
+                texture = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    SurfaceTexture(false)
+                } else {
+                    SurfaceTexture(0)
+                }.apply {
+                    setDefaultBufferSize(frameWidth, frameHeight)
+                }
+                uvc.setPreviewTexture(texture)
                 uvc.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_NV21)
                 uvc.startPreview()
+                previewTexture = texture
                 camera = uvc
                 activeDevice = device
                 bridgeState = "camera-open"
                 report("opened ${describe(device)} at ${frameWidth}x$frameHeight MJPEG")
             } catch (t: Throwable) {
+                runCatching { texture?.release() }
                 runCatching { uvc.destroy() }
                 bridgeState = "camera-error"
                 report("UVC open failed: ${t.javaClass.simpleName}: ${t.message}")
@@ -264,7 +278,9 @@ class CameraBridge(
     }
     private fun stopCameraLocked(nextState: String) {
         val current = camera
+        val texture = previewTexture
         camera = null
+        previewTexture = null
         activeDevice = null
         latestFrame.set(null)
         if (current != null) {
@@ -272,6 +288,7 @@ class CameraBridge(
             runCatching { current.stopPreview() }
             runCatching { current.destroy() }
         }
+        runCatching { texture?.release() }
         bridgeState = nextState
     }
 
