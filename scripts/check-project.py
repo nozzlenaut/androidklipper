@@ -315,8 +315,12 @@ assert 'schedule_replacement = "MIN_SCHEDULE_TIME = 0.250"' in klipper_patch
 assert "BUFFER_TIME_HIGH = 2.0" in klipper_patch
 assert "BUFFER_TIME_START = 0.750" in klipper_patch
 assert 'reqtime_replacement = "#define MIN_REQTIME_DELTA 0.500"' in klipper_patch
+assert "BGFLUSH_SG_LOW_TIME = 1.000" in klipper_patch
+assert "BGFLUSH_SG_HIGH_TIME = 1.500" in klipper_patch
 vendor_script = (root / "scripts/vendor-klipper.sh").read_text()
 assert '"$VENDOR/klippy/chelper/serialqueue.c"' in vendor_script
+assert '"$PY_VENDOR/klippy/extras/motion_queuing.py"' in vendor_script
+assert '"$PY_ROOT/extras/motion_queuing.py"' in vendor_script
 assert "KLIPPER_VERSION" in vendor_script
 
 # When the vendor step has run (always true in CI), verify the generated Klipper
@@ -329,6 +333,11 @@ if vendored.exists():
     assert "TRSYNC_TIMEOUT = 0.050" in mcu_text
     assert "BUFFER_TIME_HIGH = 2.0" in toolhead_text
     assert "BUFFER_TIME_START = 0.750" in toolhead_text
+    motion_vendor_text = (vendored / "klippy/extras/motion_queuing.py").read_text()
+    motion_root_text = (root / "app/src/main/python/extras/motion_queuing.py").read_text()
+    for motion_text in (motion_vendor_text, motion_root_text):
+        assert "BGFLUSH_SG_LOW_TIME = 1.000" in motion_text
+        assert "BGFLUSH_SG_HIGH_TIME = 1.500" in motion_text
     vendor_serialqueue = root / "vendor/klipper/klippy/chelper/serialqueue.c"
     assert vendor_serialqueue.exists()
     assert "#define MIN_REQTIME_DELTA 0.500" in vendor_serialqueue.read_text()
