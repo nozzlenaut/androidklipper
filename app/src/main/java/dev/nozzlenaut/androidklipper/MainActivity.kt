@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
@@ -81,6 +82,10 @@ class MainActivity : Activity() {
                 requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
             }
         }
+        val camera = Button(this).apply {
+            text = "Enable/retry USB camera"
+            setOnClickListener { requestCameraPermission() }
+        }
         autoStartButton = Button(this).apply {
             setOnClickListener {
                 val enabled = !automationPrefs.getBoolean(
@@ -125,6 +130,7 @@ class MainActivity : Activity() {
         root.addView(test)
         root.addView(smoke)
         root.addView(realConfig)
+        root.addView(camera)
         root.addView(autoStartButton)
         root.addView(kiosk)
         root.addView(copy)
@@ -239,6 +245,25 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun requestCameraPermission() {
+        val device = usbManager.deviceList.values.firstOrNull { candidate ->
+            (0 until candidate.interfaceCount).any { index ->
+                candidate.getInterface(index).interfaceClass == UsbConstants.USB_CLASS_VIDEO
+            }
+        }
+        if (device == null) {
+            status.text = "No USB UVC camera found."
+            return
+        }
+        if (usbManager.hasPermission(device)) {
+            status.text = "USB camera access already granted; reopening camera..."
+            KlipperHostService.retryCamera(this)
+            return
+        }
+        UsbPermissionReceiver.requestCamera(this, usbManager, device)
+        status.text = "Grant USB camera access in the Android permission dialog."
     }
 
     private fun copyReport() {

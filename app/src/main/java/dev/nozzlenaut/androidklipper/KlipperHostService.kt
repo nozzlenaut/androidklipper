@@ -60,6 +60,10 @@ class KlipperHostService : Service() {
     }
     private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
     private val mainsailServer by lazy { MainsailServer(this) }
+    private val cameraBridge by lazy {
+        CameraBridge(this) { message -> HostDiagnostics.log(this, "camera: $message") }
+    }
+    private val cameraBridgeStarted = AtomicBoolean(false)
     private var hostWakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -93,6 +97,26 @@ class KlipperHostService : Service() {
             else -> "Starting USB host test…"
         }
         startForeground(NOTIFICATION_ID, notification(startText))
+        if (!cameraBridgeStarted.get()) {
+            runCatching { cameraBridge.start() }
+                .onSuccess { cameraBridgeStarted.set(true) }
+                .onFailure {
+                    HostDiagnostics.log(
+                        this,
+                        "camera bridge start ERROR ${it.javaClass.simpleName}: ${it.message}"
+                    )
+                }
+        }
+        if (intent?.action == ACTION_RETRY_CAMERA) {
+            runCatching { cameraBridge.retryGrantedCamera() }
+                .onFailure {
+                    HostDiagnostics.log(
+                        this,
+                        "camera retry ERROR ${it.javaClass.simpleName}: ${it.message}"
+                    )
+                }
+            return START_STICKY
+        }
         if (realConfig) acquireHostWakeLock()
 
         // A second USB attach/permission callback must never tear down a live print.
@@ -651,6 +675,9 @@ class KlipperHostService : Service() {
         klippyExecutor.shutdownNow()
         statusServer.close()
         runCatching { mainsailServer.stop() }
+        if (cameraBridgeStarted.getAndSet(false)) {
+            runCatching { cameraBridge.close() }
+        }
         releaseHostWakeLock()
         HostDiagnostics.log(this, "service onDestroy end")
         super.onDestroy()
@@ -660,6 +687,7 @@ class KlipperHostService : Service() {
 
     companion object {
         const val ACTION_STATUS = "dev.nozzlenaut.androidklipper.STATUS"
+        private const val ACTION_RETRY_CAMERA = "dev.nozzlenaut.androidklipper.RETRY_CAMERA"
         const val EXTRA_STATUS = "status"
         const val EXTRA_FULL_SMOKE = "full_smoke"
         const val EXTRA_REAL_CONFIG = "real_config"
@@ -693,6 +721,14 @@ class KlipperHostService : Service() {
             val intent = Intent(context, KlipperHostService::class.java).apply {
                 putExtra(EXTRA_FULL_SMOKE, fullSmoke)
                 putExtra(EXTRA_REAL_CONFIG, realConfig)
+            }
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
+            else context.startService(intent)
+        }
+
+        fun retryCamera(context: Context) {
+            val intent = Intent(context, KlipperHostService::class.java).apply {
+                action = ACTION_RETRY_CAMERA
             }
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
             else context.startService(intent)
