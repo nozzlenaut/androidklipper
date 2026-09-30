@@ -314,7 +314,10 @@ klipper_patch = (root / "scripts/patch-klipper.py").read_text()
 assert 'schedule_replacement = "MIN_SCHEDULE_TIME = 0.250"' in klipper_patch
 assert "BUFFER_TIME_HIGH = 2.0" in klipper_patch
 assert "BUFFER_TIME_START = 0.750" in klipper_patch
-assert "KLIPPER_VERSION" in (root / "scripts/vendor-klipper.sh").read_text()
+assert 'reqtime_replacement = "#define MIN_REQTIME_DELTA 0.500"' in klipper_patch
+vendor_script = (root / "scripts/vendor-klipper.sh").read_text()
+assert '"$VENDOR/klippy/chelper/serialqueue.c"' in vendor_script
+assert "KLIPPER_VERSION" in vendor_script
 
 # When the vendor step has run (always true in CI), verify the generated Klipper
 # tree rather than trusting the patch script alone.
@@ -326,6 +329,9 @@ if vendored.exists():
     assert "TRSYNC_TIMEOUT = 0.050" in mcu_text
     assert "BUFFER_TIME_HIGH = 2.0" in toolhead_text
     assert "BUFFER_TIME_START = 0.750" in toolhead_text
+    vendor_serialqueue = root / "vendor/klipper/klippy/chelper/serialqueue.c"
+    assert vendor_serialqueue.exists()
+    assert "#define MIN_REQTIME_DELTA 0.500" in vendor_serialqueue.read_text()
     assert (vendored / "KLIPPER_COMMIT").read_text().strip() == "2d7717e3b62ea2fe3401b27f54f8681f80451c69"
     assert (vendored / "KLIPPER_VERSION").read_text().strip() == "v0.13.0-756-g2d7717e3"
 

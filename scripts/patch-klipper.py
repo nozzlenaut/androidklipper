@@ -179,3 +179,19 @@ PRIMING_CMD_TIME = 0.100
             "Klippy toolhead queue patch point changed; inspect upstream before updating the pin")
     toolhead_path.write_text(
         toolhead_text.replace(queue_needle, queue_replacement, 1))
+
+
+if len(sys.argv) >= 11:
+    serialqueue_path = Path(sys.argv[10])
+    serialqueue_text = serialqueue_path.read_text()
+    # Upstream Linux Klipper delays motion packets until only 100ms before their
+    # requested MCU clock. AndroidKlipper has an extra PTY -> JVM -> UsbManager
+    # hop, and the G2 logs show the fatal NHK packet arriving ~97ms before a
+    # "Timer too close" shutdown. Release scheduled packets substantially earlier.
+    reqtime_needle = "#define MIN_REQTIME_DELTA 0.100"
+    reqtime_replacement = "#define MIN_REQTIME_DELTA 0.500"
+    if reqtime_needle not in serialqueue_text:
+        raise SystemExit(
+            "Klipper serialqueue send-ahead patch point changed; inspect upstream before updating the pin")
+    serialqueue_path.write_text(
+        serialqueue_text.replace(reqtime_needle, reqtime_replacement, 1))
