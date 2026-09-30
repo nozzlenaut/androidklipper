@@ -494,39 +494,48 @@ class KlipperHostService : Service() {
         dataRoot.mkdirs()
         val internalGcodes = File(dataRoot, "gcodes")
 
-        val removableRoot = getExternalFilesDirs(null)
-            .filterNotNull()
-            .firstOrNull { dir ->
-                Environment.isExternalStorageRemovable(dir) &&
-                    Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
-            }
+        // Keep uploaded G-code outside printer_data so rebuilding the embedded
+        // Klipper/Moonraker runtime cannot wipe the user's print library.
+        // Prefer a removable SD card when present; otherwise use Android's
+        // primary app-external storage as the persistent "AndroidKlipperDrive".
+        val externalRoots = getExternalFilesDirs(null).filterNotNull()
+        val removableRoot = externalRoots.firstOrNull { dir ->
+            Environment.isExternalStorageRemovable(dir) &&
+                Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
+        }
+        val primaryRoot = getExternalFilesDir(null)?.takeIf { dir ->
+            Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
+        }
+        val driveRoot = removableRoot ?: primaryRoot
 
-        if (removableRoot == null) {
+        if (driveRoot == null) {
             if (!internalGcodes.exists()) internalGcodes.mkdirs()
-            return "G-code storage: internal (" + internalGcodes.absolutePath + ")"
+            return "G-code drive WARNING: external storage unavailable; using internal storage"
         }
 
-        val sdGcodes = File(removableRoot, "gcodes")
-        if (!sdGcodes.exists() && !sdGcodes.mkdirs()) {
+        val driveGcodes = File(File(driveRoot, "AndroidKlipperDrive"), "gcodes")
+        if (!driveGcodes.exists() && !driveGcodes.mkdirs()) {
             if (!internalGcodes.exists()) internalGcodes.mkdirs()
-            return "G-code storage WARNING: SD folder unavailable; using internal storage"
+            return "G-code drive WARNING: unable to create " +
+                driveGcodes.absolutePath + "; using internal storage"
         }
 
         val linkPath = internalGcodes.toPath()
         if (Files.isSymbolicLink(linkPath)) {
             val target = runCatching { Files.readSymbolicLink(linkPath).toString() }.getOrNull()
-            if (target == sdGcodes.absolutePath) {
-                return "G-code storage: removable SD (" + sdGcodes.absolutePath + ")"
+            if (target == driveGcodes.absolutePath) {
+                return "G-code drive: " + driveGcodes.absolutePath
             }
             runCatching { Files.delete(linkPath) }
         } else if (internalGcodes.exists()) {
             val existing = internalGcodes.listFiles().orEmpty()
-            if (existing.isNotEmpty()) {
-                existing.forEach { source ->
-                    val dest = File(sdGcodes, source.name)
-                    runCatching {
-                        if (source.isDirectory) source.copyRecursively(dest, overwrite = true)
-                        else source.copyTo(dest, overwrite = true)
+            existing.forEach { source ->
+                val dest = File(driveGcodes, source.name)
+                runCatching {
+                    // The persistent drive wins if the same file is already there.
+                    if (!dest.exists()) {
+                        if (source.isDirectory) source.copyRecursively(dest, overwrite = false)
+                        else source.copyTo(dest, overwrite = false)
                     }
                 }
             }
@@ -535,15 +544,16 @@ class KlipperHostService : Service() {
 
         return try {
             internalGcodes.parentFile?.mkdirs()
-            Os.symlink(sdGcodes.absolutePath, internalGcodes.absolutePath)
+            Os.symlink(driveGcodes.absolutePath, internalGcodes.absolutePath)
             val probe = File(internalGcodes, ".androidklipper-storage-probe")
             probe.writeText("ok")
             probe.delete()
-            "G-code storage: removable SD (" + sdGcodes.absolutePath + ")"
+            "G-code drive: " + driveGcodes.absolutePath
         } catch (t: Throwable) {
             runCatching { internalGcodes.delete() }
             internalGcodes.mkdirs()
-            "G-code storage WARNING: SD link failed (" + t.javaClass.simpleName + ": " + t.message + "); using internal storage"
+            "G-code drive WARNING: link failed (" +
+                t.javaClass.simpleName + ": " + t.message + "); using internal storage"
         }
     }
 
