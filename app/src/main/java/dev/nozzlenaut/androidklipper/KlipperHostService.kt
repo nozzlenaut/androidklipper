@@ -623,7 +623,29 @@ class KlipperHostService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        HostDiagnostics.log(this, "service onTaskRemoved")
+        val protectHost = persistentHostActive.get() ||
+            servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)
+        HostDiagnostics.log(
+            this,
+            "service onTaskRemoved protectHost=$protectHost sessions=${sessions.size}"
+        )
+        if (protectHost) {
+            // Removing the UI task must not demote or rebuild a live printer host.
+            // Refresh the foreground-service state and wake lock in place; keep the
+            // existing Klippy process, PTYs, and USB sessions completely untouched.
+            acquireHostWakeLock()
+            runCatching {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification("Klipper host running")
+                )
+            }.onFailure {
+                HostDiagnostics.log(
+                    this,
+                    "onTaskRemoved foreground refresh failed: ${it.javaClass.simpleName}: ${it.message}"
+                )
+            }
+        }
         super.onTaskRemoved(rootIntent)
     }
 

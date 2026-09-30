@@ -83,10 +83,14 @@ Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeRead(
 
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_nozzlenaut_androidklipper_pty_PtyBridge_nativeWrite(
-        JNIEnv* env, jclass, jint fd, jbyteArray data) {
-    if (fd < 0) return -1;
-    const jsize len = env->GetArrayLength(data);
+        JNIEnv* env, jclass, jint fd, jbyteArray data, jint requested_len) {
+    if (fd < 0 || data == nullptr) return -1;
+    const jsize array_len = env->GetArrayLength(data);
+    if (requested_len < 0 || requested_len > array_len) return -1;
+    const jsize len = requested_len;
+    if (len == 0) return 0;
     jbyte* bytes = env->GetByteArrayElements(data, nullptr);
+    if (bytes == nullptr) return -1;
     ssize_t total = 0;
     while (total < len) {
         const ssize_t n = write(fd, bytes + total, static_cast<size_t>(len - total));

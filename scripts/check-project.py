@@ -28,6 +28,7 @@ assert "android.hardware.usb.action.USB_DEVICE_ATTACHED" in manifest
 assert "@xml/device_filter" in manifest
 assert 'android:launchMode="singleTop"' in manifest
 assert 'android.permission.WAKE_LOCK' in manifest
+assert 'android:stopWithTask="false"' in manifest
 
 device_filter = (root / "app/src/main/res/xml/device_filter.xml").read_text()
 assert 'vendor-id="7504"' in device_filter
@@ -40,6 +41,10 @@ assert 'version = "3.11"' in build
 service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert 'deviceDisplayName()' in service
 assert 'Settings.Global.getString(contentResolver, "device_name")' in service
+assert "override fun onTaskRemoved" in service
+assert "servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)" in service
+assert "acquireHostWakeLock()" in service
+assert 'notification("Klipper host running")' in service
 persistent_host = (root / "app/src/main/python/persistent_host.py").read_text()
 assert '"hostname": str(device_name).strip() or "AndroidKlipper"' in persistent_host
 assert 'armeabi-v7a' in build and 'arm64-v8a' in build
@@ -74,6 +79,13 @@ assert "Thread.sleep(5)" not in usb_session
 assert "THREAD_PRIORITY_URGENT_AUDIO" not in usb_session
 assert "THREAD_PRIORITY_FOREGROUND" in usb_session
 assert "statsSnapshot" in usb_session
+assert "buffer.copyOf(n)" not in usb_session
+assert "pty.write(buffer, n)" in usb_session
+
+pty_kotlin = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/pty/PtyBridge.kt").read_text()
+assert "fun write(data: ByteArray, length: Int = data.size)" in pty_kotlin
+assert "nativeWrite(masterFd, data, length)" in pty_kotlin
+assert "nativeWrite(fd: Int, data: ByteArray, length: Int)" in pty_kotlin
 
 klipper_patch = (root / "scripts/patch-klipper.py").read_text()
 assert 'trsync_needle = "TRSYNC_TIMEOUT = 0.025"' in klipper_patch
@@ -86,6 +98,8 @@ assert "cfmakeraw" in pty_bridge
 assert "tcsetattr" in pty_bridge
 assert "POLLHUP" in pty_bridge
 assert "errno == EIO" in pty_bridge
+assert "jint requested_len" in pty_bridge
+assert "requested_len > array_len" in pty_bridge
 
 permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbPermissionReceiver.kt").read_text()
 assert "KlipperHostService.EXTRA_FULL_SMOKE" in permission_receiver
