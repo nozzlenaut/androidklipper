@@ -93,14 +93,8 @@ class CameraBridge(
         bridgeState = "starting"
         try {
             server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
-            val usbMonitor = USBMonitor(context, deviceListener)
-            monitor = usbMonitor
-            usbMonitor.register()
-            bridgeState = "waiting-for-camera"
-            report("camera server listening on :$CAMERA_PORT")
-            usbMonitor.getDeviceList()
-                .firstOrNull(::isUvcCamera)
-                ?.let(::requestPermission)
+            bridgeState = "camera-disabled"
+            report("camera server listening on :$CAMERA_PORT; UVC disabled until explicitly enabled")
         } catch (t: Throwable) {
             bridgeState = "start-error"
             started.set(false)
@@ -133,12 +127,7 @@ class CameraBridge(
 
     fun retryGrantedCamera() {
         requestingPermission.set(false)
-        val usbMonitor = monitor
-        if (usbMonitor == null) {
-            bridgeState = "waiting-for-camera"
-            report("camera retry requested before USB monitor was ready")
-            return
-        }
+        val usbMonitor = ensureUsbMonitor() ?: return
         val device = usbMonitor.getDeviceList().firstOrNull(::isUvcCamera)
         if (device == null) {
             bridgeState = "waiting-for-camera"
@@ -146,6 +135,29 @@ class CameraBridge(
             return
         }
         requestPermission(device)
+    }
+    private fun ensureUsbMonitor(): USBMonitor? {
+        monitor?.let { return it }
+        if (!started.get()) {
+            bridgeState = "camera-server-not-ready"
+            return null
+        }
+        return synchronized(cameraLock) {
+            monitor?.let { return@synchronized it }
+            val usbMonitor = USBMonitor(context, deviceListener)
+            try {
+                usbMonitor.register()
+                monitor = usbMonitor
+                bridgeState = "waiting-for-camera"
+                report("UVC monitor explicitly enabled")
+                usbMonitor
+            } catch (t: Throwable) {
+                runCatching { usbMonitor.destroy() }
+                bridgeState = "camera-monitor-error"
+                report("UVC monitor enable failed: ${t.javaClass.simpleName}: ${t.message}")
+                null
+            }
+        }
     }
     private fun openCamera(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
         synchronized(cameraLock) {
@@ -359,11 +371,20 @@ class CameraBridge(
             )
         }
 
-        private fun streamResponse(): Response = newChunkedResponse(
-            Response.Status.OK,
-            "multipart/x-mixed-replace; boundary=frame",
-            MjpegInputStream { latestFrame.get() }
-        )
+        private fun streamResponse(): Response {
+            if (latestFrame.get() == null) {
+                return newFixedLengthResponse(
+                    Response.Status.SERVICE_UNAVAILABLE,
+                    MIME_PLAINTEXT,
+                    "Camera stream unavailable: $bridgeState"
+                )
+            }
+            return newChunkedResponse(
+                Response.Status.OK,
+                "multipart/x-mixed-replace; boundary=frame",
+                MjpegInputStream { latestFrame.get() }
+            )
+        }
     }
     private class MjpegInputStream(
         private val provider: () -> Frame?

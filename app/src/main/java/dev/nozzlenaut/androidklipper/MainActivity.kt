@@ -83,7 +83,7 @@ class MainActivity : Activity() {
             }
         }
         val camera = Button(this).apply {
-            text = "Grant USB camera access"
+            text = "Enable/retry USB camera"
             setOnClickListener { requestCameraPermission() }
         }
         autoStartButton = Button(this).apply {
