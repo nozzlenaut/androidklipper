@@ -188,9 +188,9 @@ class CameraBridge(
     }
     private fun configurePreview(uvc: UVCCamera) {
         val profiles = listOf(
+            PreviewProfile(320, 240, UVCCamera.FRAME_FORMAT_MJPEG, "MJPEG"),
             PreviewProfile(640, 360, UVCCamera.FRAME_FORMAT_MJPEG, "MJPEG"),
-            PreviewProfile(640, 480, UVCCamera.FRAME_FORMAT_MJPEG, "MJPEG"),
-            PreviewProfile(640, 480, UVCCamera.FRAME_FORMAT_YUYV, "YUYV")
+            PreviewProfile(640, 480, UVCCamera.FRAME_FORMAT_MJPEG, "MJPEG")
         )
         var lastFailure: Throwable? = null
         for (profile in profiles) {
@@ -198,14 +198,14 @@ class CameraBridge(
                 uvc.setPreviewSize(
                     profile.width,
                     profile.height,
-                    MIN_CAMERA_FPS,
-                    MAX_CAMERA_FPS,
+                    TARGET_CAMERA_FPS,
+                    TARGET_CAMERA_FPS,
                     profile.format,
-                    UVCCamera.DEFAULT_BANDWIDTH
+                    CAMERA_BANDWIDTH_FACTOR
                 )
                 frameWidth = profile.width
                 frameHeight = profile.height
-                report("UVC profile ${profile.label} ${profile.width}x${profile.height}")
+                report("UVC profile ${profile.label} ${profile.width}x${profile.height} @ ${TARGET_CAMERA_FPS}fps bandwidth=${CAMERA_BANDWIDTH_FACTOR}")
                 return
             } catch (t: Throwable) {
                 lastFailure = t
@@ -426,10 +426,10 @@ class CameraBridge(
         const val SNAPSHOT_PATH = "/snapshot.jpg"
         private const val PREVIEW_WIDTH = 640
         private const val PREVIEW_HEIGHT = 360
-        private const val MIN_CAMERA_FPS = 5
-        private const val MAX_CAMERA_FPS = 15
-        private const val JPEG_QUALITY = 75
-        private const val FRAME_INTERVAL_MS = 100L
+        private const val TARGET_CAMERA_FPS = 5
+        private const val CAMERA_BANDWIDTH_FACTOR = 0.50f
+        private const val JPEG_QUALITY = 70
+        private const val FRAME_INTERVAL_MS = 200L
         private const val STREAM_POLL_MS = 25L
         private const val USB_VIDEO_CLASS = 14
     }
