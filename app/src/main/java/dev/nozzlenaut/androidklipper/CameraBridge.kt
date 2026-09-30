@@ -6,6 +6,7 @@ import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.graphics.YuvImage
 import android.os.Build
+import android.os.SystemClock
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import com.serenegiant.usb.IFrameCallback
@@ -17,6 +18,7 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -34,9 +36,14 @@ class CameraBridge(
     private val encoding = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
     private val requestingPermission = AtomicBoolean(false)
+    private val cameraArmed = AtomicBoolean(false)
+    private val lastFrameAtElapsedMs = AtomicLong(0)
     private val cameraLock = Any()
     private val encoder = Executors.newSingleThreadExecutor { task ->
         Thread(task, "androidklipper-camera-jpeg").apply { isDaemon = true }
+    }
+    private val cameraWatchdog = Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "androidklipper-camera-watchdog").apply { isDaemon = true }
     }
     private val server = CameraHttpServer(CAMERA_PORT)
 
@@ -55,13 +62,18 @@ class CameraBridge(
         override fun onAttach(device: UsbDevice) {
             if (!isUvcCamera(device)) return
             report("UVC attached: ${describe(device)}")
+            if (!cameraArmed.get()) {
+                report("UVC remains disarmed until explicit camera retry")
+                return
+            }
             requestPermission(device)
         }
 
         override fun onDettach(device: UsbDevice) {
             if (activeDevice?.deviceId == device.deviceId) {
-                report("UVC detached: ${describe(device)}")
-                stopCamera("waiting-for-camera")
+                cameraArmed.set(false)
+                report("UVC detached: ${describe(device)}; manual retry required")
+                stopCamera("camera-disconnected-retry-required")
             }
         }
 
@@ -72,17 +84,24 @@ class CameraBridge(
         ) {
             if (!isUvcCamera(device)) return
             requestingPermission.set(false)
+            if (!cameraArmed.get()) {
+                report("ignoring late UVC connect while camera is disarmed")
+                runCatching { ctrlBlock.close() }
+                return
+            }
             openCamera(device, ctrlBlock)
         }
         override fun onDisconnect(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
             if (activeDevice?.deviceId == device.deviceId) {
-                report("UVC disconnected: ${describe(device)}")
-                stopCamera("waiting-for-camera")
+                cameraArmed.set(false)
+                report("UVC disconnected: ${describe(device)}; manual retry required")
+                stopCamera("camera-disconnected-retry-required")
             }
         }
 
         override fun onCancel(device: UsbDevice) {
             requestingPermission.set(false)
+            cameraArmed.set(false)
             bridgeState = "permission-denied"
             report("UVC permission denied: ${describe(device)}")
         }
@@ -94,6 +113,9 @@ class CameraBridge(
         try {
             server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             bridgeState = "camera-disabled"
+            cameraWatchdog.scheduleAtFixedRate(
+                { checkCameraHealth() }, 2, 2, TimeUnit.SECONDS
+            )
             report("camera server listening on :$CAMERA_PORT; UVC disabled until explicitly enabled")
         } catch (t: Throwable) {
             bridgeState = "start-error"
@@ -130,10 +152,13 @@ class CameraBridge(
         val usbMonitor = ensureUsbMonitor() ?: return
         val device = usbMonitor.getDeviceList().firstOrNull(::isUvcCamera)
         if (device == null) {
+            cameraArmed.set(false)
             bridgeState = "waiting-for-camera"
             report("camera retry requested but no UVC camera is attached")
             return
         }
+        cameraArmed.set(true)
+        report("camera explicitly armed for ${describe(device)}")
         requestPermission(device)
     }
     private fun ensureUsbMonitor(): USBMonitor? {
@@ -188,6 +213,7 @@ class CameraBridge(
                 previewTexture = texture
                 camera = uvc
                 activeDevice = device
+                lastFrameAtElapsedMs.set(SystemClock.elapsedRealtime())
                 bridgeState = "camera-open"
                 report("opened ${describe(device)} at ${frameWidth}x$frameHeight MJPEG")
             } catch (t: Throwable) {
@@ -269,6 +295,7 @@ class CameraBridge(
                         latestFrame.set(
                             Frame(frameSequence.incrementAndGet(), output.toByteArray())
                         )
+                        lastFrameAtElapsedMs.set(SystemClock.elapsedRealtime())
                         bridgeState = "streaming"
                     }
                 } catch (t: Throwable) {
@@ -283,6 +310,16 @@ class CameraBridge(
         }
     }
 
+    private fun checkCameraHealth() {
+        val active = activeDevice != null
+        val last = lastFrameAtElapsedMs.get()
+        val now = SystemClock.elapsedRealtime()
+        if (!CameraSafetyPolicy.shouldStopForStaleFrame(active, last, now)) return
+        if (!cameraArmed.compareAndSet(true, false)) return
+        report("UVC frame stall detected after ${now - last}ms; stopping camera and requiring manual retry")
+        stopCamera("camera-stalled-retry-required")
+    }
+
     private fun stopCamera(nextState: String) {
         synchronized(cameraLock) {
             stopCameraLocked(nextState)
@@ -295,6 +332,7 @@ class CameraBridge(
         previewTexture = null
         activeDevice = null
         latestFrame.set(null)
+        lastFrameAtElapsedMs.set(0L)
         if (current != null) {
             runCatching { current.setFrameCallback(null, 0) }
             runCatching { current.stopPreview() }
@@ -314,7 +352,9 @@ class CameraBridge(
         }
         monitor = null
         requestingPermission.set(false)
+        cameraArmed.set(false)
         runCatching { server.stop() }
+        cameraWatchdog.shutdownNow()
         encoder.shutdownNow()
         bridgeState = "stopped"
         report("camera bridge stopped")
@@ -351,8 +391,10 @@ class CameraBridge(
             val frame = latestFrame.get()
             val cameraName = activeDevice?.productName ?: "none"
             val safeName = cameraName.replace("\\", "\\\\").replace("\"", "\\\"")
+            val last = lastFrameAtElapsedMs.get()
+            val age = if (last > 0L) SystemClock.elapsedRealtime() - last else -1L
             val body = """
-                {"state":"$bridgeState","camera":"$safeName","frame_id":${frame?.id ?: 0}}
+                {"state":"$bridgeState","camera":"$safeName","frame_id":${frame?.id ?: 0},"armed":${cameraArmed.get()},"frame_age_ms":$age}
             """.trimIndent()
             return newFixedLengthResponse(Response.Status.OK, "application/json", body)
         }
