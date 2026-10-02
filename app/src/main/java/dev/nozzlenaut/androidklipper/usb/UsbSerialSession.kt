@@ -96,7 +96,7 @@ class UsbSerialSession(
                     when {
                         n > 0 -> {
                             rxBytes.addAndGet(n.toLong())
-                            val written = pty.write(buffer.copyOf(n))
+                            val written = pty.write(buffer, n)
                             if (written != n) {
                                 throw IOException(
                                     "PTY write incomplete for $stableId: wrote $written of $n bytes"

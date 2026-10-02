@@ -33,6 +33,9 @@ git -C "$VENDOR" describe --always --tags --long > "$PY_VENDOR/KLIPPER_VERSION"
   "$PY_ROOT/extras/statistics.py" \
   "$PY_VENDOR/klippy/gcode.py" \
   "$PY_VENDOR/klippy/webhooks.py" \
-  "$PY_VENDOR/klippy/toolhead.py"
+  "$PY_VENDOR/klippy/toolhead.py" \
+  "$VENDOR/klippy/chelper/serialqueue.c" \
+  "$PY_VENDOR/klippy/extras/motion_queuing.py" \
+  "$PY_ROOT/extras/motion_queuing.py"
 
 echo "Vendored Klipper $KLIPPER_COMMIT"

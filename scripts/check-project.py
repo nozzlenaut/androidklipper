@@ -28,6 +28,7 @@ assert "android.hardware.usb.action.USB_DEVICE_ATTACHED" in manifest
 assert "@xml/device_filter" in manifest
 assert 'android:launchMode="singleTop"' in manifest
 assert 'android.permission.WAKE_LOCK' in manifest
+assert 'android:stopWithTask="false"' in manifest
 
 device_filter = (root / "app/src/main/res/xml/device_filter.xml").read_text()
 assert 'vendor-id="7504"' in device_filter
@@ -40,6 +41,10 @@ assert 'version = "3.11"' in build
 service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert 'deviceDisplayName()' in service
 assert 'Settings.Global.getString(contentResolver, "device_name")' in service
+assert "override fun onTaskRemoved" in service
+assert "servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)" in service
+assert "acquireHostWakeLock()" in service
+assert 'notification("Klipper host running")' in service
 persistent_host = (root / "app/src/main/python/persistent_host.py").read_text()
 assert '"hostname": str(device_name).strip() or "AndroidKlipper"' in persistent_host
 assert 'armeabi-v7a' in build and 'arm64-v8a' in build
@@ -74,6 +79,13 @@ assert "Thread.sleep(5)" not in usb_session
 assert "THREAD_PRIORITY_URGENT_AUDIO" not in usb_session
 assert "THREAD_PRIORITY_FOREGROUND" in usb_session
 assert "statsSnapshot" in usb_session
+assert "buffer.copyOf(n)" not in usb_session
+assert "pty.write(buffer, n)" in usb_session
+
+pty_kotlin = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/pty/PtyBridge.kt").read_text()
+assert "fun write(data: ByteArray, length: Int = data.size)" in pty_kotlin
+assert "nativeWrite(masterFd, data, length)" in pty_kotlin
+assert "nativeWrite(fd: Int, data: ByteArray, length: Int)" in pty_kotlin
 
 klipper_patch = (root / "scripts/patch-klipper.py").read_text()
 assert 'trsync_needle = "TRSYNC_TIMEOUT = 0.025"' in klipper_patch
@@ -86,6 +98,8 @@ assert "cfmakeraw" in pty_bridge
 assert "tcsetattr" in pty_bridge
 assert "POLLHUP" in pty_bridge
 assert "errno == EIO" in pty_bridge
+assert "jint requested_len" in pty_bridge
+assert "requested_len > array_len" in pty_bridge
 
 permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbPermissionReceiver.kt").read_text()
 assert "KlipperHostService.EXTRA_FULL_SMOKE" in permission_receiver
@@ -270,6 +284,10 @@ assert "androidklipper-battery" in mainsail_patch
 assert "Percent [%]" in mainsail_patch
 assert "prepareGcodeStorage" in host_service
 assert "Environment.isExternalStorageRemovable" in host_service
+assert "getExternalFilesDir(null)" in host_service
+assert '"AndroidKlipperDrive"' in host_service
+assert '"G-code drive: "' in host_service
+assert "if (!dest.exists())" in host_service
 assert "Os.symlink" in host_service
 mainsail_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainsailActivity.kt").read_text()
 assert 'loadUrl("http://127.0.0.1:8080/")' in mainsail_activity
@@ -333,7 +351,14 @@ klipper_patch = (root / "scripts/patch-klipper.py").read_text()
 assert 'schedule_replacement = "MIN_SCHEDULE_TIME = 0.250"' in klipper_patch
 assert "BUFFER_TIME_HIGH = 2.0" in klipper_patch
 assert "BUFFER_TIME_START = 0.750" in klipper_patch
-assert "KLIPPER_VERSION" in (root / "scripts/vendor-klipper.sh").read_text()
+assert 'reqtime_replacement = "#define MIN_REQTIME_DELTA 0.500"' in klipper_patch
+assert "BGFLUSH_SG_LOW_TIME = 1.000" in klipper_patch
+assert "BGFLUSH_SG_HIGH_TIME = 1.500" in klipper_patch
+vendor_script = (root / "scripts/vendor-klipper.sh").read_text()
+assert '"$VENDOR/klippy/chelper/serialqueue.c"' in vendor_script
+assert '"$PY_VENDOR/klippy/extras/motion_queuing.py"' in vendor_script
+assert '"$PY_ROOT/extras/motion_queuing.py"' in vendor_script
+assert "KLIPPER_VERSION" in vendor_script
 
 # When the vendor step has run (always true in CI), verify the generated Klipper
 # tree rather than trusting the patch script alone.
@@ -345,6 +370,14 @@ if vendored.exists():
     assert "TRSYNC_TIMEOUT = 0.050" in mcu_text
     assert "BUFFER_TIME_HIGH = 2.0" in toolhead_text
     assert "BUFFER_TIME_START = 0.750" in toolhead_text
+    motion_vendor_text = (vendored / "klippy/extras/motion_queuing.py").read_text()
+    motion_root_text = (root / "app/src/main/python/extras/motion_queuing.py").read_text()
+    for motion_text in (motion_vendor_text, motion_root_text):
+        assert "BGFLUSH_SG_LOW_TIME = 1.000" in motion_text
+        assert "BGFLUSH_SG_HIGH_TIME = 1.500" in motion_text
+    vendor_serialqueue = root / "vendor/klipper/klippy/chelper/serialqueue.c"
+    assert vendor_serialqueue.exists()
+    assert "#define MIN_REQTIME_DELTA 0.500" in vendor_serialqueue.read_text()
     assert (vendored / "KLIPPER_COMMIT").read_text().strip() == "2d7717e3b62ea2fe3401b27f54f8681f80451c69"
     assert (vendored / "KLIPPER_VERSION").read_text().strip() == "v0.13.0-756-g2d7717e3"
 

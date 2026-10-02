@@ -179,3 +179,40 @@ PRIMING_CMD_TIME = 0.100
             "Klippy toolhead queue patch point changed; inspect upstream before updating the pin")
     toolhead_path.write_text(
         toolhead_text.replace(queue_needle, queue_replacement, 1))
+
+
+if len(sys.argv) >= 11:
+    serialqueue_path = Path(sys.argv[10])
+    serialqueue_text = serialqueue_path.read_text()
+    # Upstream Linux Klipper delays motion packets until only 100ms before their
+    # requested MCU clock. AndroidKlipper has an extra PTY -> JVM -> UsbManager
+    # hop, and the G2 logs show the fatal NHK packet arriving ~97ms before a
+    # "Timer too close" shutdown. Release scheduled packets substantially earlier.
+    reqtime_needle = "#define MIN_REQTIME_DELTA 0.100"
+    reqtime_replacement = "#define MIN_REQTIME_DELTA 0.500"
+    if reqtime_needle not in serialqueue_text:
+        raise SystemExit(
+            "Klipper serialqueue send-ahead patch point changed; inspect upstream before updating the pin")
+    serialqueue_path.write_text(
+        serialqueue_text.replace(reqtime_needle, reqtime_replacement, 1))
+
+
+if len(sys.argv) >= 13:
+    motion_needle = """BGFLUSH_SG_LOW_TIME = 0.450
+BGFLUSH_SG_HIGH_TIME = 0.700
+"""
+    motion_replacement = """# AndroidKlipper's PTY/JVM/USB transport benefits from having a deeper
+# supply of already-generated step packets. Keep active step generation
+# 1.0-1.5s ahead so the native 500ms transmit margin has real runway.
+BGFLUSH_SG_LOW_TIME = 1.000
+BGFLUSH_SG_HIGH_TIME = 1.500
+"""
+    for motion_arg in sys.argv[11:13]:
+        motion_path = Path(motion_arg)
+        motion_text = motion_path.read_text()
+        if motion_needle not in motion_text:
+            raise SystemExit(
+                "Klipper motion queue patch point changed in %s; inspect upstream before updating the pin"
+                % motion_path)
+        motion_path.write_text(
+            motion_text.replace(motion_needle, motion_replacement, 1))

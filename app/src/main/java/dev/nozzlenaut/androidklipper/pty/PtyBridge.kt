@@ -20,7 +20,12 @@ class PtyBridge private constructor(
     fun read(buffer: ByteArray, timeoutMs: Int): Int = nativeRead(masterFd, buffer, timeoutMs)
 
     // Bytes from the real USB MCU are written here so Klipper can read them.
-    fun write(data: ByteArray): Int = nativeWrite(masterFd, data)
+    // Accept a used length so the USB hot path can reuse its receive buffer
+    // instead of allocating/copying a new ByteArray for every packet.
+    fun write(data: ByteArray, length: Int = data.size): Int {
+        require(length in 0..data.size) { "Invalid PTY write length $length for ${data.size}-byte buffer" }
+        return nativeWrite(masterFd, data, length)
+    }
 
     override fun close() {
         nativeClose(masterFd)
@@ -46,7 +51,7 @@ class PtyBridge private constructor(
 
         @JvmStatic private external fun nativeCreate(): String
         @JvmStatic private external fun nativeRead(fd: Int, buffer: ByteArray, timeoutMs: Int): Int
-        @JvmStatic private external fun nativeWrite(fd: Int, data: ByteArray): Int
+        @JvmStatic private external fun nativeWrite(fd: Int, data: ByteArray, length: Int): Int
         @JvmStatic private external fun nativeClose(fd: Int)
     }
 }
