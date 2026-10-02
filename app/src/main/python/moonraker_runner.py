@@ -92,8 +92,17 @@ log_path: {logs_dir}
 file_system_observer: none
 """.format(**p)
 
-    with open(p["moonraker_config"], "w", encoding="utf-8") as cfg:
-        cfg.write(config)
+    # The persistent config directory is user-owned after first seed.
+    # Never regenerate moonraker.conf on an APK update or host restart.
+    if not os.path.exists(p["moonraker_config"]):
+        with open(p["moonraker_config"], "w", encoding="utf-8") as cfg:
+            cfg.write(config)
+
+    variables_config = os.path.join(p["config_dir"], "variables.cfg")
+    if not os.path.exists(variables_config):
+        with open(variables_config, "w", encoding="utf-8") as cfg:
+            cfg.write("[Variables]\n")
+
     return p
 
 

@@ -8,8 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbManager
 import android.os.Build
-import android.os.Environment
-import android.system.Os
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
@@ -23,7 +21,6 @@ import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -142,7 +139,7 @@ class KlipperHostService : Service() {
         if (hadSessions) Thread.sleep(USB_REOPEN_SETTLE_MS)
         if (!realConfig) releaseHostWakeLock()
 
-        val storageSummary = prepareGcodeStorage()
+        val storageSummary = PersistentPrinterDrive.prepare(this).summary
 
         if (!Python.isStarted()) Python.start(AndroidPlatform(this))
         val hostprobe = Python.getInstance().getModule("hostprobe")
@@ -487,74 +484,6 @@ class KlipperHostService : Service() {
                 "wakeLock=${hostWakeLock?.isHeld == true} interactive=${powerManager.isInteractive} " +
                 "deviceIdle=${powerManager.isDeviceIdleMode} sessions=${sessions.size} $sessionSummary"
         )
-    }
-
-    private fun prepareGcodeStorage(): String {
-        val dataRoot = File(filesDir, "printer_data")
-        dataRoot.mkdirs()
-        val internalGcodes = File(dataRoot, "gcodes")
-
-        // Keep uploaded G-code outside printer_data so rebuilding the embedded
-        // Klipper/Moonraker runtime cannot wipe the user's print library.
-        // Prefer a removable SD card when present; otherwise use Android's
-        // primary app-external storage as the persistent "AndroidKlipperDrive".
-        val externalRoots = getExternalFilesDirs(null).filterNotNull()
-        val removableRoot = externalRoots.firstOrNull { dir ->
-            Environment.isExternalStorageRemovable(dir) &&
-                Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
-        }
-        val primaryRoot = getExternalFilesDir(null)?.takeIf { dir ->
-            Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
-        }
-        val driveRoot = removableRoot ?: primaryRoot
-
-        if (driveRoot == null) {
-            if (!internalGcodes.exists()) internalGcodes.mkdirs()
-            return "G-code drive WARNING: external storage unavailable; using internal storage"
-        }
-
-        val driveGcodes = File(File(driveRoot, "AndroidKlipperDrive"), "gcodes")
-        if (!driveGcodes.exists() && !driveGcodes.mkdirs()) {
-            if (!internalGcodes.exists()) internalGcodes.mkdirs()
-            return "G-code drive WARNING: unable to create " +
-                driveGcodes.absolutePath + "; using internal storage"
-        }
-
-        val linkPath = internalGcodes.toPath()
-        if (Files.isSymbolicLink(linkPath)) {
-            val target = runCatching { Files.readSymbolicLink(linkPath).toString() }.getOrNull()
-            if (target == driveGcodes.absolutePath) {
-                return "G-code drive: " + driveGcodes.absolutePath
-            }
-            runCatching { Files.delete(linkPath) }
-        } else if (internalGcodes.exists()) {
-            val existing = internalGcodes.listFiles().orEmpty()
-            existing.forEach { source ->
-                val dest = File(driveGcodes, source.name)
-                runCatching {
-                    // The persistent drive wins if the same file is already there.
-                    if (!dest.exists()) {
-                        if (source.isDirectory) source.copyRecursively(dest, overwrite = false)
-                        else source.copyTo(dest, overwrite = false)
-                    }
-                }
-            }
-            runCatching { internalGcodes.deleteRecursively() }
-        }
-
-        return try {
-            internalGcodes.parentFile?.mkdirs()
-            Os.symlink(driveGcodes.absolutePath, internalGcodes.absolutePath)
-            val probe = File(internalGcodes, ".androidklipper-storage-probe")
-            probe.writeText("ok")
-            probe.delete()
-            "G-code drive: " + driveGcodes.absolutePath
-        } catch (t: Throwable) {
-            runCatching { internalGcodes.delete() }
-            internalGcodes.mkdirs()
-            "G-code drive WARNING: link failed (" +
-                t.javaClass.simpleName + ": " + t.message + "); using internal storage"
-        }
     }
 
     private fun deviceDisplayName(): String {

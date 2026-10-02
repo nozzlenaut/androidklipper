@@ -75,12 +75,18 @@ def _parse_mapping(stable_mapping):
 
 
 def _import_config(base_url, stable_mapping, work_dir):
-    stable_to_pty = _parse_mapping(stable_mapping)
     data_root = get_data_path(work_dir)
     config_dir = os.path.join(data_root, "config")
     for dirname in ("config", "gcodes", "logs", "comms", "database"):
         os.makedirs(os.path.join(data_root, dirname), exist_ok=True)
 
+    # The persistent drive owns printer.cfg after the first bootstrap.
+    # Never overwrite a config uploaded/edited through Mainsail on later starts.
+    config_path = os.path.join(config_dir, "printer.cfg")
+    if os.path.exists(config_path):
+        return config_path, data_root, []
+
+    stable_to_pty = _parse_mapping(stable_mapping)
     fetched = {}
     skipped_includes = []
 
