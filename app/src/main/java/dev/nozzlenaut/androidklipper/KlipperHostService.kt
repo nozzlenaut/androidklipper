@@ -416,6 +416,28 @@ class KlipperHostService : Service() {
         for (attempt in 0 until 300) {
             if (klippySocket.exists()) {
                 statusLines += "Klippy API: ${klippySocket.absolutePath}"
+
+                // Socket creation happens before config validation finishes.
+                // Wait briefly for Klippy's own state so onboarding can report
+                // READY honestly instead of treating "socket exists" as success.
+                for (readyAttempt in 0 until 100) {
+                    val runtimeStatus = runCatching {
+                        Python.getInstance().getModule("persistent_host")
+                            .callAttr("get_status").toString()
+                    }.getOrElse { "" }
+                    if (runtimeStatus.startsWith("ready:")) {
+                        statusLines += "Klippy READY: ${runtimeStatus.removePrefix("ready:").trim()}"
+                        return true
+                    }
+                    if (runtimeStatus.startsWith("error:") ||
+                        runtimeStatus.startsWith("shutdown:")
+                    ) {
+                        statusLines += "Klippy state: $runtimeStatus"
+                        return true
+                    }
+                    Thread.sleep(100)
+                }
+                statusLines += "Klippy state: starting"
                 return true
             }
             Thread.sleep(100)

@@ -14,6 +14,7 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
@@ -22,10 +23,13 @@ import android.widget.TextView
 import android.widget.Toast
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
+import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var setupGuide: TextView
     private lateinit var autoStartButton: Button
+    private lateinit var advancedControls: LinearLayout
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
     private val automationPrefs by lazy {
         getSharedPreferences(KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE)
@@ -35,6 +39,7 @@ class MainActivity : Activity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent?.getStringExtra(KlipperHostService.EXTRA_STATUS)?.let { report ->
                 status.text = report
+                updateSetupGuide(report)
                 maybeOpenAutoKiosk(report)
             }
         }
@@ -42,6 +47,14 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Normal-user behavior: USB auto-start is ON unless explicitly
+        // disabled under Advanced / troubleshooting.
+        if (!automationPrefs.contains(KlipperHostService.KEY_AUTO_START_USB)) {
+            automationPrefs.edit()
+                .putBoolean(KlipperHostService.KEY_AUTO_START_USB, true)
+                .apply()
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -52,28 +65,55 @@ class MainActivity : Activity() {
             textSize = 22f
             gravity = Gravity.CENTER_HORIZONTAL
         }
-        val safety = TextView(this).apply {
-            text = "Connect the printer, start AndroidKlipper, then open Mainsail. AndroidKlipper identifies attached Klipper MCUs and keeps config, G-code, and Moonraker data in the persistent printer drive. Upload your normal Klipper config files through Mainsail if printer.cfg is missing or needs changes. Use Stop Host before disconnecting USB."
+        val intro = TextView(this).apply {
+            text = "Turn an Android device into a Klipper host. Follow the steps below; AndroidKlipper will handle USB startup and open Mainsail automatically."
             textSize = 14f
-            setPadding(0, 16, 0, 8)
+            setPadding(0, 16, 0, 12)
+        }
+        setupGuide = TextView(this).apply {
+            textSize = 16f
+            setPadding(0, 8, 0, 18)
         }
         status = TextView(this).apply {
-            text = HostStatusStore.load(this@MainActivity)
-                ?: "Plug the printer into USB OTG, then scan."
-            textSize = 15f
-            setPadding(0, 24, 0, 24)
+            text = HostStatusStore.load(this@MainActivity) ?: "Waiting for printer USB."
+            textSize = 14f
+            setPadding(0, 16, 0, 20)
+        }
+
+        val kiosk = Button(this).apply {
+            text = "Open Mainsail"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, MainsailActivity::class.java))
+            }
+        }
+        val stop = Button(this).apply {
+            text = "Stop AndroidKlipper host"
+            setOnClickListener {
+                KlipperHostService.stop(this@MainActivity)
+                status.text = "AndroidKlipper host stopped."
+                updateSetupGuide(status.text.toString())
+            }
+        }
+        val advancedToggle = Button(this).apply {
+            text = "Show advanced / troubleshooting"
+            setOnClickListener {
+                val show = advancedControls.visibility != View.VISIBLE
+                advancedControls.visibility = if (show) View.VISIBLE else View.GONE
+                text = if (show) {
+                    "Hide advanced / troubleshooting"
+                } else {
+                    "Show advanced / troubleshooting"
+                }
+            }
+        }
+
+        advancedControls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
         }
         val scan = Button(this).apply {
             text = "Scan USB"
             setOnClickListener { scanUsb() }
-        }
-        val test = Button(this).apply {
-            text = "Grant USB access and start host test"
-            setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = false) }
-        }
-        val smoke = Button(this).apply {
-            text = "Run full Klippy no-pin smoke test"
-            setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = true) }
         }
         val realConfig = Button(this).apply {
             text = "Start AndroidKlipper host"
@@ -83,15 +123,14 @@ class MainActivity : Activity() {
         }
         autoStartButton = Button(this).apply {
             setOnClickListener {
-                val enabled = !automationPrefs.getBoolean(
-                    KlipperHostService.KEY_AUTO_START_USB, false
-                )
+                val enabled = !isAutoStartEnabled()
                 automationPrefs.edit()
                     .putBoolean(KlipperHostService.KEY_AUTO_START_USB, enabled)
                     .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
                     .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
                     .apply()
                 updateAutoStartButton()
+                updateSetupGuide()
                 Toast.makeText(
                     this@MainActivity,
                     if (enabled) "USB auto-start enabled" else "USB auto-start disabled",
@@ -100,44 +139,47 @@ class MainActivity : Activity() {
             }
         }
         updateAutoStartButton()
-        val kiosk = Button(this).apply {
-            text = "Open Mainsail kiosk"
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, MainsailActivity::class.java))
-            }
-        }
         val copy = Button(this).apply {
             text = "Copy diagnostic report"
             setOnClickListener { copyReport() }
         }
-        val stop = Button(this).apply {
-            text = "Stop Klipper/Moonraker host"
-            setOnClickListener {
-                KlipperHostService.stop(this@MainActivity)
-                status.text = "Host test stopped."
-            }
+        val test = Button(this).apply {
+            text = "Run USB host test"
+            setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = false) }
         }
+        val smoke = Button(this).apply {
+            text = "Run full Klippy no-pin smoke test"
+            setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = true) }
+        }
+
+        advancedControls.addView(scan)
+        advancedControls.addView(realConfig)
+        advancedControls.addView(autoStartButton)
+        advancedControls.addView(copy)
+        advancedControls.addView(test)
+        advancedControls.addView(smoke)
 
         root.addView(heading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        root.addView(safety, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        root.addView(scan)
-        root.addView(test)
-        root.addView(smoke)
-        root.addView(realConfig)
-        root.addView(autoStartButton)
+        root.addView(intro, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.addView(setupGuide, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(kiosk)
-        root.addView(copy)
         root.addView(stop)
+        root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.addView(advancedToggle)
+        root.addView(advancedControls)
         setContentView(ScrollView(this).apply { addView(root) })
 
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 44)
         }
-        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
-            handleUsbAttach()
-        } else if (HostStatusStore.load(this) == null) {
-            scanUsb()
+
+        updateSetupGuide()
+        when {
+            intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED -> handleUsbAttach()
+            supportedUsbDevices().isNotEmpty() && isAutoStartEnabled() -> handleUsbAttach()
+            HostStatusStore.load(this) == null -> scanUsb()
         }
     }
 
@@ -151,7 +193,10 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        HostStatusStore.load(this)?.let { status.text = it }
+        HostStatusStore.load(this)?.let {
+            status.text = it
+            updateSetupGuide(it)
+        } ?: updateSetupGuide()
         val filter = IntentFilter(KlipperHostService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -166,28 +211,68 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    private fun isAutoStartEnabled(): Boolean =
+        automationPrefs.getBoolean(KlipperHostService.KEY_AUTO_START_USB, true)
+
+    private fun supportedUsbDevices() =
+        usbManager.deviceList.values.filter { UsbDeviceScanner.isSupported(it) }
+
     private fun updateAutoStartButton() {
-        val enabled = automationPrefs.getBoolean(
-            KlipperHostService.KEY_AUTO_START_USB, false
-        )
         autoStartButton.text =
             "Auto-start AndroidKlipper + Mainsail on printer USB: " +
-                if (enabled) "ON" else "OFF"
+                if (isAutoStartEnabled()) "ON" else "OFF"
+    }
+
+    private fun updateSetupGuide(report: String? = HostStatusStore.load(this)) {
+        val supported = supportedUsbDevices()
+        val permissionsGranted =
+            supported.isNotEmpty() && supported.all { usbManager.hasPermission(it) }
+        val moonrakerReady = report?.contains("Moonraker READY:") == true
+        val configPresent = File(filesDir, "printer_data/config/printer.cfg").exists()
+        // Only mark this complete when the host publishes an explicit
+        // READY state. A Klippy API socket can exist while config validation is
+        // still in error, so socket presence alone is not enough.
+        val klippyReady = report?.contains("Klippy READY:") == true
+
+        fun mark(done: Boolean) = if (done) "✓" else "•"
+
+        setupGuide.text = buildString {
+            append(mark(true) + " 1. Install and open AndroidKlipper\n")
+            append(mark(supported.isNotEmpty()) + " 2. Plug in printer USB and turn the printer on")
+            if (supported.isNotEmpty()) {
+                append("  (" + supported.size + " USB device(s) detected)")
+            }
+            append("\n")
+            append(mark(permissionsGranted) + " 3. Grant USB access when Android asks\n")
+            append(mark(moonrakerReady) + " 4. AndroidKlipper starts Moonraker and opens Mainsail\n")
+            append(mark(configPresent) + " 5. If printer.cfg is missing, upload your normal config files in Mainsail\n")
+            append(mark(klippyReady) + " 6. Klipper reaches READY — upload G-code and print")
+
+            if (!isAutoStartEnabled()) {
+                append("\n\nUSB auto-start is OFF. Enable it under Advanced / troubleshooting for the normal setup flow.")
+            } else if (supported.isEmpty()) {
+                append("\n\nWaiting for printer USB…")
+            } else if (!permissionsGranted) {
+                append("\n\nPrinter USB detected. Tap Allow on each Android USB permission prompt.")
+            } else if (!moonrakerReady) {
+                append("\n\nUSB access granted. Starting AndroidKlipper…")
+            } else if (!configPresent) {
+                append("\n\nMainsail is ready. Upload printer.cfg and its included config files.")
+            }
+        }
     }
 
     private fun handleUsbAttach() {
         HostDiagnostics.log(
             this,
-            "MainActivity USB_DEVICE_ATTACHED autoStart=" +
-                automationPrefs.getBoolean(KlipperHostService.KEY_AUTO_START_USB, false)
+            "MainActivity USB_DEVICE_ATTACHED autoStart=" + isAutoStartEnabled()
         )
-        if (!automationPrefs.getBoolean(KlipperHostService.KEY_AUTO_START_USB, false)) {
+        if (!isAutoStartEnabled()) {
             scanUsb()
             return
         }
 
-        val supported = usbManager.deviceList.values
-            .filter { UsbDeviceScanner.isSupported(it) }
+        val supported = supportedUsbDevices()
         if (supported.isEmpty()) {
             scanUsb()
             status.append(
@@ -205,7 +290,8 @@ class MainActivity : Activity() {
             .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, true)
             .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, true)
             .apply()
-        status.text = "USB auto-start: printer USB detected; starting AndroidKlipper..."
+        status.text = "Printer USB detected. Starting AndroidKlipper…"
+        updateSetupGuide(status.text.toString())
         requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
     }
 
@@ -225,7 +311,7 @@ class MainActivity : Activity() {
     private fun scanUsb() {
         val found = UsbDeviceScanner.describeDevices(usbManager)
         status.text = if (found.isEmpty()) {
-            "No USB devices found."
+            "Waiting for printer USB."
         } else {
             buildString {
                 append("USB devices found: ${found.size}\n\n")
@@ -237,6 +323,7 @@ class MainActivity : Activity() {
                 }
             }
         }
+        updateSetupGuide()
     }
 
     private fun copyReport() {
@@ -258,11 +345,17 @@ class MainActivity : Activity() {
 
         val devices = usbManager.deviceList.values.toList()
         if (devices.isEmpty()) {
-            status.text = "No USB devices found."
+            status.text = "Waiting for printer USB."
+            updateSetupGuide()
             return
         }
 
         val supported = devices.filter { UsbDeviceScanner.isSupported(it) }
+        if (supported.isEmpty()) {
+            status.text = "USB device detected, but no supported serial interface was found."
+            updateSetupGuide()
+            return
+        }
         val next = supported.firstOrNull { !usbManager.hasPermission(it) }
 
         if (next == null) {
@@ -275,6 +368,7 @@ class MainActivity : Activity() {
                     .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
                     .apply()
             }
+            updateSetupGuide()
         } else {
             UsbPermissionReceiver.requestNext(
                 this,
@@ -284,10 +378,11 @@ class MainActivity : Activity() {
                 realConfig
             )
             status.text = when {
-                realConfig -> "Grant USB access. AndroidKlipper will request each supported printer USB device, identify Klipper MCUs, start Moonraker, and then start Klippy when printer.cfg is available."
+                realConfig -> "Printer USB detected. Grant USB access; AndroidKlipper will request each MCU, start Moonraker, and open Mainsail automatically."
                 fullSmoke -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the smoke test."
                 else -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the host test."
             }
+            updateSetupGuide(status.text.toString())
         }
     }
 }

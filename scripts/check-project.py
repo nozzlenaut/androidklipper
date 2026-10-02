@@ -129,6 +129,11 @@ assert "all 3 Klipper MCUs" not in main_activity
 assert "klipperCount < 3" not in main_activity
 assert "supported.isEmpty()" in main_activity
 assert "maybeOpenAutoKiosk" in main_activity
+assert "Waiting for printer USB." in main_activity
+assert "Show advanced / troubleshooting" in main_activity
+assert "updateSetupGuide" in main_activity
+assert "KEY_AUTO_START_USB, true" in main_activity
+assert "supportedUsbDevices().isNotEmpty() && isAutoStartEnabled()" in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "EXTRA_FULL_SMOKE" in host_service
@@ -150,6 +155,8 @@ assert "startMoonraker(statusLines)" in host_service
 assert "Klippy WAITING: printer.cfg is missing" in host_service
 assert "waitForFirstPrinterConfig" in host_service
 assert "printer.cfg detected: starting Klippy automatically." in host_service
+assert "Klippy READY:" in host_service
+assert "Socket creation happens before config validation finishes." in host_service
 assert "FIRST_CONFIG_POLL_MS = 500L" in host_service
 assert host_service.index("startMoonraker(statusLines)") < host_service.index(
     'val configPath = File(filesDir, "printer_data/config/printer.cfg")'
@@ -283,6 +290,10 @@ mainsail_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/Mains
 assert 'port: Int = 8080' in mainsail_server
 assert '"hostname": "$hostname"' in mainsail_server
 assert '"port": 7125' in mainsail_server
+assert 'uri.substringBefore(\'?\') == "/sw.js"' in mainsail_server
+assert "noCacheWorker" in mainsail_server
+assert "caches.keys()" in mainsail_server
+assert 'Cache-Control", "no-store, max-age=0' in mainsail_server
 assert (root / "app/src/main/assets/mainsail/index.html").exists()
 assert (root / "app/src/main/assets/mainsail/sw.js").exists()
 drive = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/PersistentPrinterDrive.kt").read_text()
@@ -300,6 +311,8 @@ mainsail_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/Mai
 assert 'loadUrl("http://127.0.0.1:8080/")' in mainsail_activity
 assert "setLayerType(View.LAYER_TYPE_HARDWARE" in mainsail_activity
 assert "FLAG_KEEP_SCREEN_ON" in mainsail_activity
+assert "WebSettings.LOAD_NO_CACHE" in mainsail_activity
+assert "clearCache(true)" in mainsail_activity
 
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch

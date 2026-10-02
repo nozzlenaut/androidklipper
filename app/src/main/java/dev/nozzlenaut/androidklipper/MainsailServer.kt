@@ -20,6 +20,35 @@ class MainsailServer(
         val rawUri = session.uri ?: "/"
         val uri = runCatching { URLDecoder.decode(rawUri, "UTF-8") }.getOrDefault(rawUri)
 
+        if (uri.substringBefore('?') == "/sw.js") {
+            // The Mainsail PWA service worker normally precaches the whole UI.
+            // AndroidKlipper already ships every asset inside the APK, and
+            // persistent browser caches can mix old/new asset bundles after an
+            // APK update (for example, a blank CodeMirror config editor).
+            // Keep a tiny pass-through service worker instead and delete any
+            // caches left by older embedded Mainsail versions.
+            val noCacheWorker = """
+                self.addEventListener('install', event => {
+                  self.skipWaiting();
+                });
+                self.addEventListener('activate', event => {
+                  event.waitUntil(
+                    caches.keys()
+                      .then(keys => Promise.all(keys.map(key => caches.delete(key))))
+                      .then(() => self.clients.claim())
+                  );
+                });
+            """.trimIndent()
+            return newFixedLengthResponse(
+                Response.Status.OK,
+                "application/javascript; charset=utf-8",
+                noCacheWorker
+            ).apply {
+                addHeader("Cache-Control", "no-store, max-age=0")
+                addHeader("Service-Worker-Allowed", "/")
+            }
+        }
+
         if (uri.substringBefore('?') == "/config.json") {
             val requestHost = session.headers["host"]
                 ?.substringBefore(':')
