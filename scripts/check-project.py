@@ -192,6 +192,9 @@ assert 'self._serialport.startswith("/dev/pts/")' in patcher
 assert "def _android_resolve_serial(serialport):" in patcher
 assert 'ANDROID_KLIPPER_SERIAL_MAP' in patcher
 assert "_android_resolve_serial(config.get('serial'))" in patcher
+assert "configured_restart_method = config.getchoice(" in patcher
+assert "if baud:" in patcher
+assert "self._restart_method = configured_restart_method" in patcher
 
 vendor = (root / "scripts/vendor-klipper.sh").read_text()
 assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
