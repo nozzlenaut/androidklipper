@@ -115,17 +115,25 @@ assert "KEY_AUTO_KIOSK_PENDING" in permission_receiver
 main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
 assert "Run full Klippy no-pin smoke test" in main_activity
 assert "requestUsbPermissionsAndStart(fullSmoke = true)" in main_activity
-assert "Import NUC config + start Klipper/Moonraker" in main_activity
+assert "Start AndroidKlipper host" in main_activity
+assert "Import NUC config" not in main_activity
 assert "realConfig = true" in main_activity
 assert "UsbManager.ACTION_USB_DEVICE_ATTACHED" in main_activity
 assert "override fun onNewIntent" in main_activity
 assert "UsbPermissionReceiver.requestNext" in main_activity
 assert 'getSharedPreferences("usb_permission_mode"' in main_activity
 assert "devices.forEachIndexed" not in main_activity
-assert "Auto-start real host + Mainsail on printer USB" in main_activity
+assert "Auto-start AndroidKlipper + Mainsail on printer USB" in main_activity
 assert "handleUsbAttach()" in main_activity
-assert "klipperCount < 3" in main_activity
+assert "all 3 Klipper MCUs" not in main_activity
+assert "klipperCount < 3" not in main_activity
+assert "supported.isEmpty()" in main_activity
 assert "maybeOpenAutoKiosk" in main_activity
+assert "Waiting for printer USB." in main_activity
+assert "Show advanced / troubleshooting" in main_activity
+assert "updateSetupGuide" in main_activity
+assert "KEY_AUTO_START_USB, true" in main_activity
+assert "supportedUsbDevices().isNotEmpty() && isAutoStartEnabled()" in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "EXTRA_FULL_SMOKE" in host_service
@@ -133,13 +141,26 @@ assert "EXTRA_REAL_CONFIG" in host_service
 assert 'smokePtyPaths.joinToString("|")' in host_service
 assert "stablePtyMap" in host_service
 assert "probe_full_klippy" in host_service
-assert "http://192.168.1.83:7125" in host_service
+assert "192.168.1.83" not in host_service
+assert "CONFIG_SOURCE_URL" not in host_service
 assert "START_NOT_STICKY" in host_service
 assert "START_STICKY" in host_service
 assert "persistentHostActive" in host_service
 assert "HostDiagnostics.log" in host_service
 assert "THREAD_PRIORITY_URGENT_AUDIO" in host_service
-assert "Only arm a PTY for full/real Klippy after the MCU has" in host_service
+assert "A successful Klipper identify handshake is the authority" in host_service
+assert '"probe_mcu_identify"' in host_service
+assert "UsbDeviceScanner.isLikelyKlipper(device)" not in host_service
+assert "startMoonraker(statusLines)" in host_service
+assert "Klippy WAITING: printer.cfg is missing" in host_service
+assert "waitForFirstPrinterConfig" in host_service
+assert "printer.cfg detected: starting Klippy automatically." in host_service
+assert "Klippy READY:" in host_service
+assert "Socket creation happens before config validation finishes." in host_service
+assert "FIRST_CONFIG_POLL_MS = 500L" in host_service
+assert host_service.index("startMoonraker(statusLines)") < host_service.index(
+    'val configPath = File(filesDir, "printer_data/config/printer.cfg")'
+)
 assert "KEY_AUTO_START_USB" in host_service
 assert "KEY_AUTO_KIOSK_PENDING" in host_service
 assert "toString().also" in host_service
@@ -159,16 +180,11 @@ assert "serial_reader.connect_uart(path" not in hostprobe
 assert "import extras.error_mcu" in hostprobe
 assert "import kinematics.none" in hostprobe
 assert "def probe_full_klippy(pty_paths, c_helper_path, work_dir):" in hostprobe
-assert "def probe_real_config_from_moonraker(" in hostprobe
-assert "3F001E001450535556323420" in hostprobe
-assert "3033393834057C77" in hostprobe
-assert "504450610844C31C" in hostprobe
-assert "temperature_sensor NUC" in hostprobe
-assert "K-ShakeTune" in hostprobe
-assert "restart_method" in hostprobe
-assert "Android PTYs are treated as Klipper pipe transports" in hostprobe
-assert "~/printer_data/gcodes" in hostprobe
-assert "~/printer_data/config/variables" in hostprobe
+assert "probe_real_config_from_moonraker" not in hostprobe
+assert "_sanitize_android_config" not in hostprobe
+assert "3F001E001450535556323420" not in hostprobe
+assert "3033393834057C77" not in hostprobe
+assert "504450610844C31C" not in hostprobe
 assert '"kinematics: none"' in hostprobe
 assert '"max_velocity: 1"' in hostprobe
 assert '"max_accel: 1"' in hostprobe
@@ -180,6 +196,12 @@ patcher = (root / "scripts/patch-klipper.py").read_text()
 assert "serialport.startswith('/dev/pts/')" in patcher
 assert "return self.connect_pipe(serialport)" in patcher
 assert 'self._serialport.startswith("/dev/pts/")' in patcher
+assert "def _android_resolve_serial(serialport):" in patcher
+assert 'ANDROID_KLIPPER_SERIAL_MAP' in patcher
+assert "_android_resolve_serial(config.get('serial'))" in patcher
+assert "configured_restart_method = config.getchoice(" in patcher
+assert "if baud:" in patcher
+assert "self._restart_method = configured_restart_method" in patcher
 
 vendor = (root / "scripts/vendor-klipper.sh").read_text()
 assert '"$PY_VENDOR/klippy/serialhdl.py"' in vendor
@@ -230,12 +252,13 @@ persistent = (root / "app/src/main/python/persistent_host.py").read_text()
 assert '"apiserver": api_socket' in persistent
 assert '"gcode_fd": None' in persistent
 assert '"printer_data"' in persistent
-assert "The persistent drive owns printer.cfg" in persistent
-assert "if os.path.exists(config_path)" in persistent
-assert "Never overwrite a config uploaded/edited through Mainsail" in persistent
+assert "def _prepare_existing_config(work_dir):" in persistent
+assert "printer.cfg is missing; upload your Klipper config in Mainsail" in persistent
+assert '"ANDROID_KLIPPER_SERIAL_MAP"' in persistent
 assert '"comms", "klippy.sock"' in persistent
 assert "def stop():" in persistent
-assert "def run(base_url, stable_mapping, c_helper_path, work_dir, device_name):" in persistent
+assert "def run(stable_mapping, c_helper_path, work_dir, device_name):" in persistent
+assert "base_url" not in persistent
 
 moon_runner = (root / "app/src/main/python/moonraker_runner.py").read_text()
 assert "host: 0.0.0.0" in moon_runner
@@ -267,6 +290,10 @@ mainsail_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/Mains
 assert 'port: Int = 8080' in mainsail_server
 assert '"hostname": "$hostname"' in mainsail_server
 assert '"port": 7125' in mainsail_server
+assert 'uri.substringBefore(\'?\') == "/sw.js"' in mainsail_server
+assert "noCacheWorker" in mainsail_server
+assert "caches.keys()" in mainsail_server
+assert 'Cache-Control", "no-store, max-age=0' in mainsail_server
 assert (root / "app/src/main/assets/mainsail/index.html").exists()
 assert (root / "app/src/main/assets/mainsail/sw.js").exists()
 drive = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/PersistentPrinterDrive.kt").read_text()
@@ -284,6 +311,8 @@ mainsail_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/Mai
 assert 'loadUrl("http://127.0.0.1:8080/")' in mainsail_activity
 assert "setLayerType(View.LAYER_TYPE_HARDWARE" in mainsail_activity
 assert "FLAG_KEEP_SCREEN_ON" in mainsail_activity
+assert "WebSettings.LOAD_NO_CACHE" in mainsail_activity
+assert "clearCache(true)" in mainsail_activity
 
 
 assert "STREAMING_FORM_DATA_AVAILABLE" in moon_patch
@@ -335,7 +364,7 @@ assert '"software_version": get_klipper_version()' in persistent
 assert '"androidklipper-persistent"' not in persistent
 assert '"androidklipper-smoke"' not in hostprobe
 assert '"androidklipper-real-config"' not in hostprobe
-assert hostprobe.count('"software_version": get_klipper_version()') >= 2
+assert hostprobe.count('"software_version": get_klipper_version()') == 1
 assert 'first_line == "MCU Protocol error"' in persistent
 
 klipper_patch = (root / "scripts/patch-klipper.py").read_text()
@@ -359,6 +388,9 @@ if vendored.exists():
     toolhead_text = (vendored / "klippy/toolhead.py").read_text()
     assert "MIN_SCHEDULE_TIME = 0.250" in mcu_text
     assert "TRSYNC_TIMEOUT = 0.050" in mcu_text
+    assert "def _android_resolve_serial(serialport):" in mcu_text
+    assert 'ANDROID_KLIPPER_SERIAL_MAP' in mcu_text
+    assert "_android_resolve_serial(config.get('serial'))" in mcu_text
     assert "BUFFER_TIME_HIGH = 2.0" in toolhead_text
     assert "BUFFER_TIME_START = 0.750" in toolhead_text
     motion_vendor_text = (vendored / "klippy/extras/motion_queuing.py").read_text()

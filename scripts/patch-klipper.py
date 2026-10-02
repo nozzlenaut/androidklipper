@@ -39,6 +39,43 @@ if len(sys.argv) >= 3:
 if len(sys.argv) >= 4:
     mcu_path = Path(sys.argv[3])
     mcu_text = mcu_path.read_text()
+
+    # Keep the user's normal /dev/serial/by-id config intact. AndroidKlipper
+    # publishes the current stable USB-serial -> PTY mapping through an
+    # environment variable, and Klipper resolves it only at connection time.
+    resolver_import_needle = "import serialhdl, msgproto, pins, chelper, clocksync\n"
+    resolver_import_replacement = resolver_import_needle + """
+def _android_resolve_serial(serialport):
+    mapping = os.environ.get("ANDROID_KLIPPER_SERIAL_MAP", "")
+    if not mapping or not serialport or serialport.startswith("/dev/pts/"):
+        return serialport
+    lower_port = serialport.lower()
+    for item in mapping.split("|"):
+        if "=" not in item:
+            continue
+        stable_id, pty_path = item.split("=", 1)
+        if stable_id and stable_id.lower() in lower_port:
+            logging.info("AndroidKlipper MCU serial map: %s -> %s",
+                         serialport, pty_path)
+            return pty_path
+    return serialport
+
+"""
+    if resolver_import_needle not in mcu_text:
+        raise SystemExit(
+            "Klipper MCU serial resolver patch point changed; inspect upstream before updating the pin")
+    mcu_text = mcu_text.replace(
+        resolver_import_needle, resolver_import_replacement, 1)
+
+    serial_config_needle = "            self._serialport = config.get('serial')"
+    serial_config_replacement = (
+        "            self._serialport = _android_resolve_serial(config.get('serial'))")
+    if serial_config_needle not in mcu_text:
+        raise SystemExit(
+            "Klipper MCU serial config patch point changed; inspect upstream before updating the pin")
+    mcu_text = mcu_text.replace(
+        serial_config_needle, serial_config_replacement, 1)
+
     mcu_needle = """            if not (self._serialport.startswith("/dev/rpmsg_")
                     or self._serialport.startswith("/tmp/klipper_host_")):
 """
@@ -49,6 +86,32 @@ if len(sys.argv) >= 4:
     if mcu_needle not in mcu_text:
         raise SystemExit("Klipper mcu PTY patch point changed; inspect upstream before updating the pin")
     mcu_text = mcu_text.replace(mcu_needle, mcu_replacement, 1)
+
+    # AndroidKlipper resolves normal /dev/serial/by-id paths to PTYs.
+    # Upstream Klipper only consumes restart_method when a hardware UART baud
+    # rate is present. PTY-backed MCU connections therefore leave a perfectly
+    # normal Linux config option "unused" and abort config validation. Consume
+    # the option on every MCU, but preserve upstream behavior by applying it
+    # only when baud is present. AndroidKlipper owns physical USB rebinds.
+    restart_needle = """        restart_methods = [None, 'arduino', 'cheetah', 'command', 'rpi_usb']
+        self._restart_method = 'command'
+        serialport, baud = conn_helper.get_serialport()
+        if baud:
+            self._restart_method = config.getchoice('restart_method',
+                                                    restart_methods, None)
+"""
+    restart_replacement = """        restart_methods = [None, 'arduino', 'cheetah', 'command', 'rpi_usb']
+        self._restart_method = 'command'
+        serialport, baud = conn_helper.get_serialport()
+        configured_restart_method = config.getchoice(
+            'restart_method', restart_methods, None)
+        if baud:
+            self._restart_method = configured_restart_method
+"""
+    if restart_needle not in mcu_text:
+        raise SystemExit(
+            "Klipper MCU restart_method patch point changed; inspect upstream before updating the pin")
+    mcu_text = mcu_text.replace(restart_needle, restart_replacement, 1)
 
     # Android/Chaquopy can occasionally exceed Klipper's default 25ms
     # multi-MCU trsync window even when USB has no retransmits.

@@ -25,7 +25,11 @@ class MainsailActivity : Activity() {
             webViewClient = WebViewClient()
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.cacheMode = WebSettings.LOAD_DEFAULT
+            // Every Mainsail asset is served locally from the APK. Avoid WebView
+            // HTTP cache reuse across APK updates so hashed JS chunks and the
+            // config editor always match the installed build.
+            clearCache(true)
+            settings.cacheMode = WebSettings.LOAD_NO_CACHE
             settings.mediaPlaybackRequiresUserGesture = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
