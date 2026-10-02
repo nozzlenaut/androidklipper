@@ -53,7 +53,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         val safety = TextView(this).apply {
-            text = "Host test is identify-only. Full Klippy smoke applies a temporary no-pin config. Real host mode imports the active Voron config, keeps Klippy running on the actual printer hardware, and starts Moonraker locally. Use Stop Host before disconnecting USB."
+            text = "Connect the printer, start AndroidKlipper, then open Mainsail. AndroidKlipper identifies attached Klipper MCUs and keeps config, G-code, and Moonraker data in the persistent printer drive. Upload your normal Klipper config files through Mainsail if printer.cfg is missing or needs changes. Use Stop Host before disconnecting USB."
             textSize = 14f
             setPadding(0, 16, 0, 8)
         }
@@ -76,7 +76,7 @@ class MainActivity : Activity() {
             setOnClickListener { requestUsbPermissionsAndStart(fullSmoke = true) }
         }
         val realConfig = Button(this).apply {
-            text = "Import NUC config + start Klipper/Moonraker"
+            text = "Start AndroidKlipper host"
             setOnClickListener {
                 requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
             }
@@ -171,7 +171,7 @@ class MainActivity : Activity() {
             KlipperHostService.KEY_AUTO_START_USB, false
         )
         autoStartButton.text =
-            "Auto-start real host + Mainsail on printer USB: " +
+            "Auto-start AndroidKlipper + Mainsail on printer USB: " +
                 if (enabled) "ON" else "OFF"
     }
 
@@ -188,12 +188,10 @@ class MainActivity : Activity() {
 
         val supported = usbManager.deviceList.values
             .filter { UsbDeviceScanner.isSupported(it) }
-        val klipperCount = supported.count { UsbDeviceScanner.isLikelyKlipper(it) }
-        if (klipperCount < 3) {
+        if (supported.isEmpty()) {
             scanUsb()
             status.append(
-                "\n\nUSB auto-start armed: waiting for all 3 Klipper MCUs " +
-                    "($klipperCount/3 detected)."
+                "\n\nUSB auto-start armed: waiting for a supported printer USB serial device."
             )
             return
         }
@@ -207,7 +205,7 @@ class MainActivity : Activity() {
             .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, true)
             .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, true)
             .apply()
-        status.text = "USB auto-start: printer detected; starting real host..."
+        status.text = "USB auto-start: printer USB detected; starting AndroidKlipper..."
         requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
     }
 
@@ -286,7 +284,7 @@ class MainActivity : Activity() {
                 realConfig
             )
             status.text = when {
-                realConfig -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start persistent Klipper and Moonraker."
+                realConfig -> "Grant USB access. AndroidKlipper will request each supported printer USB device, identify Klipper MCUs, start Moonraker, and then start Klippy when printer.cfg is available."
                 fullSmoke -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the smoke test."
                 else -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the host test."
             }

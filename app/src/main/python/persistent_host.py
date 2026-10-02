@@ -7,18 +7,9 @@ socket exposed from this runtime.
 import gc
 import logging
 import os
-import re
 import time
-import urllib.parse
-import urllib.request
 
-from hostprobe import _klippy_path, _sanitize_android_config, get_klipper_version
-
-_REQUIRED_IDS = {
-    "3F001E001450535556323420",
-    "3033393834057C77",
-    "504450610844C31C",
-}
+from hostprobe import _klippy_path, get_klipper_version
 
 _current_printer = None
 _current_reactor = None
@@ -61,82 +52,18 @@ def get_klippy_socket(work_dir):
     return os.path.join(get_data_path(work_dir), "comms", "klippy.sock")
 
 
-def _parse_mapping(stable_mapping):
-    stable_to_pty = {}
-    for item in str(stable_mapping).split("|"):
-        if not item or "=" not in item:
-            continue
-        stable_id, pty_path = item.split("=", 1)
-        stable_to_pty[stable_id] = pty_path
-    missing_ids = _REQUIRED_IDS.difference(stable_to_pty)
-    if missing_ids:
-        raise RuntimeError("Missing expected MCU mappings: %s" % sorted(missing_ids))
-    return stable_to_pty
-
-
-def _import_config(base_url, stable_mapping, work_dir):
+def _prepare_existing_config(work_dir):
     data_root = get_data_path(work_dir)
     config_dir = os.path.join(data_root, "config")
     for dirname in ("config", "gcodes", "logs", "comms", "database"):
         os.makedirs(os.path.join(data_root, dirname), exist_ok=True)
 
-    # The persistent drive owns printer.cfg after the first bootstrap.
-    # Never overwrite a config uploaded/edited through Mainsail on later starts.
-    config_path = os.path.join(config_dir, "printer.cfg")
-    if os.path.exists(config_path):
-        return config_path, data_root, []
-
-    stable_to_pty = _parse_mapping(stable_mapping)
-    fetched = {}
-    skipped_includes = []
-
-    def fetch_config(relpath):
-        relpath = relpath.replace("\\", "/").lstrip("/")
-        if relpath in fetched:
-            return fetched[relpath]
-        if any(ch in relpath for ch in "*?["):
-            skipped_includes.append(relpath)
-            return ""
-        url = (
-            base_url.rstrip("/")
-            + "/server/files/config/"
-            + urllib.parse.quote(relpath, safe="/")
-        )
-        with urllib.request.urlopen(url, timeout=8) as response:
-            text = response.read().decode("utf-8")
-        fetched[relpath] = text
-        for inc in re.findall(r"(?im)^\s*\[include\s+([^\]]+)\]\s*$", text):
-            inc = inc.strip()
-            if inc.lower().startswith("k-shaketune/"):
-                skipped_includes.append(inc)
-                continue
-            fetch_config(inc)
-        return text
-
-    fetch_config("printer.cfg")
-    try:
-        fetch_config("variables.cfg")
-    except Exception:
-        pass
-
-    for relpath, source in fetched.items():
-        clean = _sanitize_android_config(
-            relpath, source, stable_to_pty, data_root
-        )
-        dest = os.path.join(config_dir, relpath)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "w", encoding="utf-8") as out_file:
-            out_file.write(clean)
-
-    variables_path = os.path.join(config_dir, "variables.cfg")
-    if not os.path.exists(variables_path):
-        with open(variables_path, "w", encoding="utf-8") as out_file:
-            out_file.write("[Variables]\n")
-
     config_path = os.path.join(config_dir, "printer.cfg")
     if not os.path.exists(config_path):
-        raise RuntimeError("Moonraker import did not produce printer.cfg")
-    return config_path, data_root, skipped_includes
+        raise RuntimeError(
+            "printer.cfg is missing; upload your Klipper config in Mainsail"
+        )
+    return config_path, data_root
 
 
 def stop():
@@ -159,8 +86,8 @@ def stop():
         return "Klippy stop ERROR %s: %s" % (type(exc).__name__, exc)
 
 
-def run(base_url, stable_mapping, c_helper_path, work_dir, device_name):
-    """Run the real Voron config persistently and expose Klipper's API socket.
+def run(stable_mapping, c_helper_path, work_dir, device_name):
+    """Run the user's persistent Klipper config and expose its API socket.
 
     This function intentionally blocks for the lifetime of Klippy.  Android
     runs it on a dedicated worker thread. RESTART uses Klipper's normal outer
@@ -170,13 +97,12 @@ def run(base_url, stable_mapping, c_helper_path, work_dir, device_name):
     global _current_printer, _current_reactor, _stop_requested
 
     os.environ["ANDROID_KLIPPER_CHELPER"] = c_helper_path
+    os.environ["ANDROID_KLIPPER_SERIAL_MAP"] = str(stable_mapping)
     _klippy_path()
     import klippy
     import reactor
 
-    config_path, data_root, skipped = _import_config(
-        base_url, stable_mapping, work_dir
-    )
+    config_path, data_root = _prepare_existing_config(work_dir)
     api_socket = os.path.join(data_root, "comms", "klippy.sock")
     log_path = os.path.join(data_root, "logs", "klippy.log")
     try:
@@ -197,11 +123,7 @@ def run(base_url, stable_mapping, c_helper_path, work_dir, device_name):
         "hostname": str(device_name).strip() or "AndroidKlipper",
     }
 
-    skipped_summary = ", ".join(sorted(set(skipped))) or "none"
-    _set_status(
-        "starting: config=%s; socket=%s; skipped=%s"
-        % (config_path, api_socket, skipped_summary)
-    )
+    _set_status("starting: config=%s; socket=%s" % (config_path, api_socket))
 
     final_result = "exit"
     try:

@@ -201,20 +201,25 @@ class KlipperHostService : Service() {
                 sessions += session
 
                 val pipeProbe = hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
-                val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
+                // Do not guess printer compatibility from VID:PID alone. Many
+                // Klipper boards sit behind CH340/FTDI/other USB-serial chips.
+                // A successful Klipper identify handshake is the authority.
+                val identifyProbe = try {
                     hostprobe.callAttr(
                         "probe_mcu_identify",
                         pty.slavePath,
                         helper.absolutePath,
-                        115200
+                        250000
                     ).toString().also {
-                        // Only arm a PTY for full/real Klippy after the MCU has
-                        // actually completed Klipper identify successfully.
                         smokePtyPaths += pty.slavePath
                         stablePtyMap[stableId] = pty.slavePath
                     }
-                } else {
-                    "Klipper identify skipped: unknown serial device"
+                } catch (t: Throwable) {
+                    sessions.remove(session)
+                    runCatching { session.close() }
+                    throw IllegalStateException(
+                        "serial device did not identify as Klipper: ${t.message}", t
+                    )
                 }
 
                 statusLines += buildString {
@@ -229,119 +234,26 @@ class KlipperHostService : Service() {
             }
         }
 
-        val allLikelyKlipper = supported.isNotEmpty() &&
-            supported.all { (device, _) -> UsbDeviceScanner.isLikelyKlipper(device) }
-        val allIdentified = smokePtyPaths.size == supported.size && allLikelyKlipper
+        val allIdentified = stablePtyMap.isNotEmpty()
 
         if (realConfig) {
-            if (!allIdentified || stablePtyMap.size != supported.size) {
-                persistentHostActive.set(false)
-                releaseHostWakeLock()
-                HostDiagnostics.log(this, "persistent host skipped: MCU identify incomplete")
-                statusLines += "Persistent host SKIPPED: every supported USB device must identify as a Klipper MCU first."
-            } else {
-                val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
-                val klippySocket = File(filesDir, "printer_data/comms/klippy.sock")
-                publishStatus(
-                    "AndroidKlipper persistent host\n\n" +
-                        statusLines.joinToString("\n\n") +
-                        "\n\nImporting active config and starting persistent Klippy…"
-                )
+            val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
+            statusLines += "Klipper MCUs identified: ${stablePtyMap.size}"
+            val moonrakerReady = startMoonraker(statusLines)
 
-                klippyExecutor.execute {
-                    HostDiagnostics.log(this, "Klippy worker starting")
-                    var firmwareRestartRequested = false
-                    try {
-                        val persistent = Python.getInstance().getModule("persistent_host")
-                        val result = persistent.callAttr(
-                            "run",
-                            CONFIG_SOURCE_URL,
-                            stableMapping,
-                            helper.absolutePath,
-                            filesDir.absolutePath,
-                            deviceDisplayName()
-                        ).toString()
-                        firmwareRestartRequested = result.contains("firmware_restart")
-                        HostDiagnostics.log(this, "Klippy worker returned: $result")
-                        if (firmwareRestartRequested) {
-                            publishStatus("Firmware restart: rebinding Android USB sessions?")
-                        } else {
-                            publishStatus("Persistent Klippy stopped\n\n$result")
-                        }
-                    } catch (t: Throwable) {
-                        HostDiagnostics.log(
-                            this,
-                            "Klippy worker ERROR ${t.javaClass.simpleName}: ${t.message}"
-                        )
-                        publishStatus("Persistent Klippy ERROR ${t.javaClass.simpleName}: ${t.message}")
-                    } finally {
-                        persistentHostActive.set(false)
-                        if (firmwareRestartRequested &&
-                            servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)) {
-                            scheduleFirmwareRestartRecovery(sessions.size)
-                        }
+            val configPath = File(filesDir, "printer_data/config/printer.cfg")
+            when {
+                stablePtyMap.isEmpty() -> {
+                    statusLines += "Klippy WAITING: no USB serial device completed a Klipper identify handshake."
+                }
+                !configPath.exists() -> {
+                    statusLines += "Klippy WAITING: printer.cfg is missing. Open Mainsail and upload your normal Klipper config files."
+                    if (moonrakerReady) {
+                        waitForFirstPrinterConfig(stableMapping, helper, statusLines.toList())
                     }
                 }
-
-                var klippySocketReady = false
-                for (attempt in 0 until 300) {
-                    if (klippySocket.exists()) {
-                        klippySocketReady = true
-                        break
-                    }
-                    Thread.sleep(100)
-                }
-
-                if (!klippySocketReady) {
-                    persistentHostActive.set(false)
-                    releaseHostWakeLock()
-                    HostDiagnostics.log(this, "persistent host failed: Klippy API socket did not appear")
-                    statusLines += "Persistent Klippy ERROR: API socket did not appear."
-                } else {
-                    statusLines += "Persistent Klippy API: ${klippySocket.absolutePath}"
-                    publishStatus(
-                        "AndroidKlipper persistent host\n\n" +
-                            statusLines.joinToString("\n\n") +
-                            "\n\nStarting Moonraker on http://127.0.0.1:7125 …"
-                    )
-
-                    moonrakerExecutor.execute {
-                        HostDiagnostics.log(this, "Moonraker worker starting")
-                        try {
-                            val runner = Python.getInstance().getModule("moonraker_runner")
-                            val result = runner.callAttr("run", filesDir.absolutePath).toString()
-                            HostDiagnostics.log(this, "Moonraker worker returned: $result")
-                            publishStatus("Moonraker stopped\n\n$result")
-                        } catch (t: Throwable) {
-                            HostDiagnostics.log(
-                                this,
-                                "Moonraker worker ERROR ${t.javaClass.simpleName}: ${t.message}"
-                            )
-                            publishStatus("Moonraker ERROR ${t.javaClass.simpleName}: ${t.message}")
-                        }
-                    }
-
-                    var moonrakerReady = false
-                    for (attempt in 0 until 300) {
-                        try {
-                            Socket().use { socket ->
-                                socket.connect(InetSocketAddress("127.0.0.1", 7125), 200)
-                            }
-                            moonrakerReady = true
-                            break
-                        } catch (_: Throwable) {
-                            Thread.sleep(100)
-                        }
-                    }
-                    statusLines += if (moonrakerReady) {
-                        "Moonraker READY: http://127.0.0.1:7125"
-                    } else {
-                        val runnerStatus = runCatching {
-                            Python.getInstance().getModule("moonraker_runner")
-                                .callAttr("get_status").toString()
-                        }.getOrElse { "status unavailable: ${it.message}" }
-                        "Moonraker ERROR: port 7125 did not open.\nMoonraker runtime: $runnerStatus"
-                    }
+                else -> {
+                    startPersistentKlippy(stableMapping, helper, statusLines)
                 }
             }
         } else if (fullSmoke) {
@@ -382,6 +294,140 @@ class KlipperHostService : Service() {
             title + "\n\n" + statusLines.joinToString("\n\n")
         }
         publishStatus(summary)
+    }
+
+    private fun waitForFirstPrinterConfig(
+        stableMapping: String,
+        helper: File,
+        baseStatus: List<String>
+    ) {
+        hostExecutor.execute {
+            val configPath = File(filesDir, "printer_data/config/printer.cfg")
+            HostDiagnostics.log(this, "waiting for first printer.cfg upload")
+            while (persistentHostActive.get() &&
+                servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)
+            ) {
+                if (configPath.exists()) {
+                    val lines = baseStatus.toMutableList()
+                    lines += "printer.cfg detected: starting Klippy automatically."
+                    HostDiagnostics.log(this, "printer.cfg detected; starting Klippy")
+                    startPersistentKlippy(stableMapping, helper, lines)
+                    publishStatus(
+                        "AndroidKlipper host\n\n" + lines.joinToString("\n\n")
+                    )
+                    return@execute
+                }
+                Thread.sleep(FIRST_CONFIG_POLL_MS)
+            }
+            HostDiagnostics.log(this, "printer.cfg wait ended: host no longer active")
+        }
+    }
+
+    private fun startMoonraker(statusLines: MutableList<String>): Boolean {
+        publishStatus(
+            "AndroidKlipper host\n\n" +
+                statusLines.joinToString("\n\n") +
+                "\n\nStarting Moonraker on http://127.0.0.1:7125 …"
+        )
+
+        moonrakerExecutor.execute {
+            HostDiagnostics.log(this, "Moonraker worker starting")
+            try {
+                val runner = Python.getInstance().getModule("moonraker_runner")
+                val result = runner.callAttr("run", filesDir.absolutePath).toString()
+                HostDiagnostics.log(this, "Moonraker worker returned: $result")
+                publishStatus("Moonraker stopped\n\n$result")
+            } catch (t: Throwable) {
+                HostDiagnostics.log(
+                    this,
+                    "Moonraker worker ERROR ${t.javaClass.simpleName}: ${t.message}"
+                )
+                publishStatus("Moonraker ERROR ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+
+        for (attempt in 0 until 300) {
+            try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("127.0.0.1", 7125), 200)
+                }
+                statusLines += "Moonraker READY: http://127.0.0.1:7125"
+                return true
+            } catch (_: Throwable) {
+                Thread.sleep(100)
+            }
+        }
+
+        val runnerStatus = runCatching {
+            Python.getInstance().getModule("moonraker_runner")
+                .callAttr("get_status").toString()
+        }.getOrElse { "status unavailable: ${it.message}" }
+        statusLines +=
+            "Moonraker ERROR: port 7125 did not open.\nMoonraker runtime: $runnerStatus"
+        return false
+    }
+
+    private fun startPersistentKlippy(
+        stableMapping: String,
+        helper: File,
+        statusLines: MutableList<String>
+    ): Boolean {
+        val klippySocket = File(filesDir, "printer_data/comms/klippy.sock")
+        publishStatus(
+            "AndroidKlipper host\n\n" +
+                statusLines.joinToString("\n\n") +
+                "\n\nStarting Klippy with persistent config…"
+        )
+
+        klippyExecutor.execute {
+            HostDiagnostics.log(this, "Klippy worker starting")
+            var firmwareRestartRequested = false
+            try {
+                val persistent = Python.getInstance().getModule("persistent_host")
+                val result = persistent.callAttr(
+                    "run",
+                    stableMapping,
+                    helper.absolutePath,
+                    filesDir.absolutePath,
+                    deviceDisplayName()
+                ).toString()
+                firmwareRestartRequested = result.contains("firmware_restart")
+                HostDiagnostics.log(this, "Klippy worker returned: $result")
+                if (firmwareRestartRequested) {
+                    publishStatus("Firmware restart: rebinding Android USB sessions…")
+                } else {
+                    publishStatus("Klippy stopped\n\n$result")
+                }
+            } catch (t: Throwable) {
+                HostDiagnostics.log(
+                    this,
+                    "Klippy worker ERROR ${t.javaClass.simpleName}: ${t.message}"
+                )
+                publishStatus("Klippy ERROR ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                if (firmwareRestartRequested &&
+                    servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)
+                ) {
+                    scheduleFirmwareRestartRecovery(sessions.size)
+                }
+            }
+        }
+
+        for (attempt in 0 until 300) {
+            if (klippySocket.exists()) {
+                statusLines += "Klippy API: ${klippySocket.absolutePath}"
+                return true
+            }
+            Thread.sleep(100)
+        }
+
+        val klippyStatus = runCatching {
+            Python.getInstance().getModule("persistent_host")
+                .callAttr("get_status").toString()
+        }.getOrElse { "status unavailable: ${it.message}" }
+        statusLines +=
+            "Klippy ERROR: API socket did not appear.\nKlippy runtime: $klippyStatus"
+        return false
     }
 
     private fun scheduleFirmwareRestartRecovery(expectedDevices: Int) {
@@ -630,13 +676,13 @@ class KlipperHostService : Service() {
         const val KEY_AUTO_KIOSK_PENDING = "auto_kiosk_pending"
         private const val PREF_SERVICE_STATE = "service_state"
         private const val KEY_DESIRED_REAL_HOST = "desired_real_host"
-        private const val CONFIG_SOURCE_URL = "http://192.168.1.83:7125"
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
         private const val USB_REOPEN_SETTLE_MS = 250L
         private const val FIRMWARE_REENUM_SETTLE_MS = 500L
         private const val FIRMWARE_REENUM_TIMEOUT_MS = 15_000L
         private const val FIRMWARE_REENUM_POLL_MS = 100L
+        private const val FIRST_CONFIG_POLL_MS = 500L
 
         fun start(
             context: Context,
