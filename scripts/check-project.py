@@ -230,6 +230,9 @@ persistent = (root / "app/src/main/python/persistent_host.py").read_text()
 assert '"apiserver": api_socket' in persistent
 assert '"gcode_fd": None' in persistent
 assert '"printer_data"' in persistent
+assert "The persistent drive owns printer.cfg" in persistent
+assert "if os.path.exists(config_path)" in persistent
+assert "Never overwrite a config uploaded/edited through Mainsail" in persistent
 assert '"comms", "klippy.sock"' in persistent
 assert "def stop():" in persistent
 assert "def run(base_url, stable_mapping, c_helper_path, work_dir, device_name):" in persistent
@@ -245,6 +248,9 @@ assert 'ipaddress.ip_network(ip + "/24"' in moon_runner
 assert "port: 7125" in moon_runner
 assert "provider: none" in moon_runner
 assert "klippy_uds_address: {klippy_socket}" in moon_runner
+assert 'if not os.path.exists(p["moonraker_config"])' in moon_runner
+assert 'variables_config = os.path.join(p["config_dir"], "variables.cfg")' in moon_runner
+assert "Never regenerate moonraker.conf" in moon_runner
 assert "server.android_request_stop()" in moon_runner
 
 assert "persistent_host" in host_service
@@ -263,13 +269,17 @@ assert '"hostname": "$hostname"' in mainsail_server
 assert '"port": 7125' in mainsail_server
 assert (root / "app/src/main/assets/mainsail/index.html").exists()
 assert (root / "app/src/main/assets/mainsail/sw.js").exists()
-assert "prepareGcodeStorage" in host_service
-assert "Environment.isExternalStorageRemovable" in host_service
-assert "getExternalFilesDir(null)" in host_service
-assert '"AndroidKlipperDrive"' in host_service
-assert '"G-code drive: "' in host_service
-assert "if (!dest.exists())" in host_service
-assert "Os.symlink" in host_service
+drive = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/PersistentPrinterDrive.kt").read_text()
+assert "PersistentPrinterDrive.prepare(this).summary" in host_service
+assert 'DRIVE_NAME = "AndroidKlipperDrive"' in drive
+assert 'listOf("config", "gcodes", "database", "backups")' in drive
+assert 'listOf("logs", "comms")' in drive
+assert "Environment.isExternalStorageRemovable" in drive
+assert "getExternalFilesDir(null)" in drive
+assert "migrateMissing" in drive
+assert "Existing persistent data wins" in drive
+assert "Os.symlink" in drive
+assert '".androidklipper-drive"' in drive
 mainsail_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainsailActivity.kt").read_text()
 assert 'loadUrl("http://127.0.0.1:8080/")' in mainsail_activity
 assert "setLayerType(View.LAYER_TYPE_HARDWARE" in mainsail_activity
