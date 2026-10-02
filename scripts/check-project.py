@@ -274,8 +274,8 @@ assert "PersistentPrinterDrive.prepare(this).summary" in host_service
 assert 'DRIVE_NAME = "AndroidKlipperDrive"' in drive
 assert 'listOf("config", "gcodes", "database", "backups")' in drive
 assert 'listOf("logs", "comms")' in drive
-assert "Environment.isExternalStorageRemovable" in drive
-assert "getExternalFilesDir(null)" in drive
+assert 'File(context.filesDir, DRIVE_NAME)' in drive
+assert "app's private Linux filesystem" in drive
 assert "migrateMissing" in drive
 assert "Existing persistent data wins" in drive
 assert "Os.symlink" in drive

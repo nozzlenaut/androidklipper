@@ -1,7 +1,6 @@
 package dev.nozzlenaut.androidklipper
 
 import android.content.Context
-import android.os.Environment
 import android.system.Os
 import java.io.File
 import java.nio.file.Files
@@ -24,18 +23,11 @@ object PersistentPrinterDrive {
         dataRoot.mkdirs()
         transientDirs.forEach { File(dataRoot, it).mkdirs() }
 
-        val driveBase = selectDriveBase(context)
-        if (driveBase == null) {
-            persistentDirs.forEach { File(dataRoot, it).mkdirs() }
-            return Result(
-                "AndroidKlipperDrive WARNING: external app storage unavailable; using internal printer_data",
-                null,
-                emptyList(),
-                listOf("persistent drive unavailable")
-            )
-        }
-
-        val driveRoot = File(driveBase, DRIVE_NAME)
+        // Keep the durable printer drive beside printer_data inside the
+        // app's private Linux filesystem. This survives normal install-over APK
+        // updates/runtime rebuilds while keeping Moonraker DB locking and mmap
+        // off Android's emulated external-storage/FUSE layer.
+        val driveRoot = File(context.filesDir, DRIVE_NAME)
         if (!driveRoot.exists() && !driveRoot.mkdirs()) {
             persistentDirs.forEach { File(dataRoot, it).mkdirs() }
             return Result(
@@ -65,18 +57,6 @@ object PersistentPrinterDrive {
             }
         }
         return Result(summary, driveRoot, linked, warnings)
-    }
-
-    private fun selectDriveBase(context: Context): File? {
-        val externalRoots = context.getExternalFilesDirs(null).filterNotNull()
-        val removable = externalRoots.firstOrNull { dir ->
-            Environment.isExternalStorageRemovable(dir) &&
-                Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
-        }
-        val primary = context.getExternalFilesDir(null)?.takeIf { dir ->
-            Environment.getExternalStorageState(dir) == Environment.MEDIA_MOUNTED
-        }
-        return removable ?: primary
     }
 
     private fun seedDriveMetadata(driveRoot: File) {
