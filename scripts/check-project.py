@@ -297,7 +297,8 @@ assert "port: 7125" in moon_runner
 assert "provider: none" in moon_runner
 assert "klippy_uds_address: {klippy_socket}" in moon_runner
 assert 'if not os.path.exists(p["moonraker_config"])' in moon_runner
-assert 'variables_config = os.path.join(p["config_dir"], "variables.cfg")' in moon_runner
+assert 'variables_config = os.path.join(p["config_dir"], "variables.cfg")' not in moon_runner
+assert "Do not seed printer-side config files" in moon_runner
 assert "Never regenerate moonraker.conf" in moon_runner
 assert "server.android_request_stop()" in moon_runner
 

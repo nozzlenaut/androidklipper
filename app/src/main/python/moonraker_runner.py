@@ -98,11 +98,9 @@ file_system_observer: none
         with open(p["moonraker_config"], "w", encoding="utf-8") as cfg:
             cfg.write(config)
 
-    variables_config = os.path.join(p["config_dir"], "variables.cfg")
-    if not os.path.exists(variables_config):
-        with open(variables_config, "w", encoding="utf-8") as cfg:
-            cfg.write("[Variables]\n")
-
+    # Do not seed printer-side config files such as variables.cfg.
+    # If a user's printer.cfg references one, onboarding should wait for the
+    # user's real file instead of masking the missing include with a placeholder.
     return p
 
 
