@@ -65,6 +65,66 @@ def probe_klipper_import():
     return "Klipper imports OK (core + extras + kinematics)"
 
 
+def check_config_includes(config_path):
+    """Return missing direct Klipper includes without validating printer options.
+
+    This mirrors Klipper's include resolution closely enough for onboarding:
+    paths are relative to the file containing the include, nested includes are
+    followed, and an empty wildcard is allowed just like upstream Klipper.
+    The goal is only to avoid starting Klippy halfway through a multi-file
+    Mainsail upload.
+    """
+    import configparser
+    import glob
+    import os
+
+    missing = []
+    visited = set()
+
+    def scan(filename):
+        path = os.path.abspath(filename)
+        if path in visited:
+            return
+        visited.add(path)
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as cfg:
+                lines = cfg.read().splitlines()
+        except OSError:
+            missing.append(path)
+            return
+
+        for line in lines:
+            # Klipper strips trailing # comments before matching section headers.
+            line = line.split("#", 1)[0]
+            match = configparser.RawConfigParser.SECTCRE.match(line)
+            header = match and match.group("header")
+            if not header or not header.startswith("include "):
+                continue
+            include_spec = header[8:].strip()
+            include_glob = os.path.join(os.path.dirname(path), include_spec)
+            matches = sorted(glob.glob(include_glob))
+            if not matches and not glob.has_magic(include_glob):
+                missing.append(include_glob)
+                continue
+            for include_path in matches:
+                scan(include_path)
+
+    scan(config_path)
+    if not missing:
+        return "ready"
+
+    root = os.path.dirname(os.path.abspath(config_path))
+    display = []
+    for path in missing:
+        try:
+            rel = os.path.relpath(path, root)
+        except ValueError:
+            rel = path
+        if rel not in display:
+            display.append(rel)
+    return "missing: " + " | ".join(display)
+
+
 def probe_mcu_identify(path, c_helper_path, baud=115200):
     """Run only Klipper's MCU identify handshake, then disconnect.
 

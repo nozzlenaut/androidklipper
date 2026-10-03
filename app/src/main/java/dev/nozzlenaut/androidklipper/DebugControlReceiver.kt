@@ -7,8 +7,7 @@ import android.content.Intent
 class DebugControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            ACTION_START_REAL,
-            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+            ACTION_START_REAL -> {
                 KlipperHostService.start(
                     context,
                     fullSmoke = false,

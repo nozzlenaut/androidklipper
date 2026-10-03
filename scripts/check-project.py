@@ -29,6 +29,11 @@ assert "@xml/device_filter" in manifest
 assert 'android:launchMode="singleTop"' in manifest
 assert 'android.permission.WAKE_LOCK' in manifest
 assert 'android:stopWithTask="false"' in manifest
+assert 'android:allowBackup="false"' in manifest
+
+debug_manifest = (root / "app/src/debug/AndroidManifest.xml").read_text()
+assert "MY_PACKAGE_REPLACED" not in debug_manifest
+assert "DEBUG_START_REAL" in debug_manifest
 
 device_filter = (root / "app/src/main/res/xml/device_filter.xml").read_text()
 assert 'vendor-id="7504"' in device_filter
@@ -111,6 +116,8 @@ assert 'getSharedPreferences("usb_permission_mode"' in permission_receiver
 assert "prefs.edit().clear().apply()" in permission_receiver
 assert "KEY_AUTO_START_IN_PROGRESS" in permission_receiver
 assert "KEY_AUTO_KIOSK_PENDING" in permission_receiver
+assert "failAutoStart(" in permission_receiver
+assert "USB access was denied." in permission_receiver
 
 main_activity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainActivity.kt").read_text()
 assert "Run full Klippy no-pin smoke test" in main_activity
@@ -134,6 +141,12 @@ assert "Show advanced / troubleshooting" in main_activity
 assert "updateSetupGuide" in main_activity
 assert "KEY_AUTO_START_USB, true" in main_activity
 assert "supportedUsbDevices().isNotEmpty() && isAutoStartEnabled()" in main_activity
+assert "USB_ATTACH_SETTLE_MS = 750L" in main_activity
+assert "clearAutoStartState()" in main_activity
+assert "Waiting briefly for all printer USB devices" in main_activity
+assert "requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS)" not in main_activity
+assert "KlipperHostService.isMoonrakerReady(this)" in main_activity
+assert "KlipperHostService.isKlippyReady(this)" in main_activity
 
 host_service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert "EXTRA_FULL_SMOKE" in host_service
@@ -154,10 +167,20 @@ assert "UsbDeviceScanner.isLikelyKlipper(device)" not in host_service
 assert "startMoonraker(statusLines)" in host_service
 assert "Klippy WAITING: printer.cfg is missing" in host_service
 assert "waitForFirstPrinterConfig" in host_service
-assert "printer.cfg detected: starting Klippy automatically." in host_service
+assert "printer.cfg and referenced includes are present: starting Klippy automatically." in host_service
+assert "missingConfigIncludes" in host_service
+assert "config upload is incomplete; waiting for" in host_service
+assert "stablePtyMap.size == supported.size" in host_service
 assert "Klippy READY:" in host_service
 assert "Socket creation happens before config validation finishes." in host_service
 assert "FIRST_CONFIG_POLL_MS = 500L" in host_service
+assert "CONFIG_UPLOAD_SETTLE_MS = 1_000L" in host_service
+assert "KEY_MOONRAKER_READY" in host_service
+assert "KEY_KLIPPY_READY" in host_service
+assert "setMoonrakerReady(true)" in host_service
+assert "setKlippyReady(true)" in host_service
+assert "isMoonrakerReady(context: Context)" in host_service
+assert "isKlippyReady(context: Context)" in host_service
 assert host_service.index("startMoonraker(statusLines)") < host_service.index(
     'val configPath = File(filesDir, "printer_data/config/printer.cfg")'
 )
@@ -180,6 +203,8 @@ assert "serial_reader.connect_uart(path" not in hostprobe
 assert "import extras.error_mcu" in hostprobe
 assert "import kinematics.none" in hostprobe
 assert "def probe_full_klippy(pty_paths, c_helper_path, work_dir):" in hostprobe
+assert "def check_config_includes(config_path):" in hostprobe
+assert "glob.has_magic(include_glob)" in hostprobe
 assert "probe_real_config_from_moonraker" not in hostprobe
 assert "_sanitize_android_config" not in hostprobe
 assert "3F001E001450535556323420" not in hostprobe

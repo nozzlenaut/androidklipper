@@ -7,6 +7,7 @@ import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import dev.nozzlenaut.androidklipper.HostDiagnostics
+import dev.nozzlenaut.androidklipper.HostStatusStore
 import dev.nozzlenaut.androidklipper.KlipperHostService
 
 class UsbPermissionReceiver : BroadcastReceiver() {
@@ -15,12 +16,10 @@ class UsbPermissionReceiver : BroadcastReceiver() {
         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
         HostDiagnostics.log(context, "USB permission callback granted=$granted")
         if (!granted) {
-            context.getSharedPreferences(
-                KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE
-            ).edit()
-                .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
-                .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
-                .apply()
+            failAutoStart(
+                context,
+                "USB access was denied. Grant printer USB access to continue."
+            )
             return
         }
         val prefs = context.getSharedPreferences("usb_permission_mode", Context.MODE_PRIVATE)
@@ -47,17 +46,39 @@ class UsbPermissionReceiver : BroadcastReceiver() {
                 "USB permission chain complete; starting service fullSmoke=$fullSmoke realConfig=$realConfig"
             )
             KlipperHostService.start(context, fullSmoke, realConfig)
-            context.getSharedPreferences(
-                KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE
-            ).edit()
-                .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
-                .apply()
+            // Leave KEY_AUTO_START_IN_PROGRESS armed until MainActivity sees
+            // Moonraker READY. Late USB attach events during host startup must
+            // not kick off a second permission/start sequence.
             prefs.edit().clear().apply()
+        } else {
+            failAutoStart(
+                context,
+                "Printer USB disconnected before permission setup completed. Reconnect it and try again."
+            )
         }
     }
 
     companion object {
         const val ACTION_USB_PERMISSION = "dev.nozzlenaut.androidklipper.USB_PERMISSION"
+
+        private fun failAutoStart(context: Context, message: String) {
+            context.getSharedPreferences(
+                KlipperHostService.PREF_AUTOMATION, Context.MODE_PRIVATE
+            ).edit()
+                .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
+                .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
+                .apply()
+            context.getSharedPreferences("usb_permission_mode", Context.MODE_PRIVATE)
+                .edit().clear().apply()
+            HostDiagnostics.log(context, message)
+            HostStatusStore.save(context, message)
+            context.sendBroadcast(
+                Intent(KlipperHostService.ACTION_STATUS).apply {
+                    putExtra(KlipperHostService.EXTRA_STATUS, message)
+                    setPackage(context.packageName)
+                }
+            )
+        }
 
         fun requestNext(
             context: Context,

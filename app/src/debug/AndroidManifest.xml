@@ -7,7 +7,6 @@
             <intent-filter>
                 <action android:name="dev.nozzlenaut.androidklipper.DEBUG_START_REAL" />
                 <action android:name="dev.nozzlenaut.androidklipper.DEBUG_STOP" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

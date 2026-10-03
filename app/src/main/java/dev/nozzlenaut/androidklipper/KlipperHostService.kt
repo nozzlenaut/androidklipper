@@ -124,6 +124,8 @@ class KlipperHostService : Service() {
             this,
             "rebuildSessions begin fullSmoke=$fullSmoke realConfig=$realConfig sessions=${sessions.size}"
         )
+        setMoonrakerReady(false)
+        setKlippyReady(false)
         if (Python.isStarted()) {
             val python = Python.getInstance()
             runCatching { python.getModule("moonraker_runner").callAttr("stop") }
@@ -234,7 +236,8 @@ class KlipperHostService : Service() {
             }
         }
 
-        val allIdentified = stablePtyMap.isNotEmpty()
+        val allIdentified =
+            supported.isNotEmpty() && stablePtyMap.size == supported.size
 
         if (realConfig) {
             val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
@@ -242,12 +245,20 @@ class KlipperHostService : Service() {
             val moonrakerReady = startMoonraker(statusLines)
 
             val configPath = File(filesDir, "printer_data/config/printer.cfg")
+            val missingIncludes =
+                if (configPath.exists()) missingConfigIncludes(configPath) else null
             when {
                 stablePtyMap.isEmpty() -> {
                     statusLines += "Klippy WAITING: no USB serial device completed a Klipper identify handshake."
                 }
                 !configPath.exists() -> {
                     statusLines += "Klippy WAITING: printer.cfg is missing. Open Mainsail and upload your normal Klipper config files."
+                    if (moonrakerReady) {
+                        waitForFirstPrinterConfig(stableMapping, helper, statusLines.toList())
+                    }
+                }
+                missingIncludes != null -> {
+                    statusLines += "Klippy WAITING: config upload is incomplete; waiting for $missingIncludes"
                     if (moonrakerReady) {
                         waitForFirstPrinterConfig(stableMapping, helper, statusLines.toList())
                     }
@@ -296,6 +307,32 @@ class KlipperHostService : Service() {
         publishStatus(summary)
     }
 
+    private fun missingConfigIncludes(configPath: File): String? {
+        return runCatching {
+            val result = Python.getInstance().getModule("hostprobe")
+                .callAttr("check_config_includes", configPath.absolutePath)
+                .toString()
+            if (result.startsWith("missing: ")) result.removePrefix("missing: ").trim()
+            else null
+        }.onFailure {
+            // Preflight is an onboarding convenience, not a replacement for
+            // Klipper's own parser. If the scan itself fails, let Klippy be the
+            // authority instead of blocking an otherwise valid config forever.
+            HostDiagnostics.log(
+                this,
+                "config include preflight skipped: ${it.javaClass.simpleName}: ${it.message}"
+            )
+        }.getOrNull()
+    }
+
+    private fun configTreeFingerprint(configDir: File): String =
+        configDir.walkTopDown()
+            .filter { it.isFile }
+            .sortedBy { it.relativeTo(configDir).path }
+            .joinToString("|") {
+                "${it.relativeTo(configDir).path}:${it.length()}:${it.lastModified()}"
+            }
+
     private fun waitForFirstPrinterConfig(
         stableMapping: String,
         helper: File,
@@ -303,19 +340,45 @@ class KlipperHostService : Service() {
     ) {
         hostExecutor.execute {
             val configPath = File(filesDir, "printer_data/config/printer.cfg")
-            HostDiagnostics.log(this, "waiting for first printer.cfg upload")
+            val cleanBase = baseStatus.filterNot { it.startsWith("Klippy WAITING:") }
+            var lastWaitReason: String? = null
+            HostDiagnostics.log(this, "waiting for usable printer.cfg upload")
             while (persistentHostActive.get() &&
                 servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)
             ) {
                 if (configPath.exists()) {
-                    val lines = baseStatus.toMutableList()
-                    lines += "printer.cfg detected: starting Klippy automatically."
-                    HostDiagnostics.log(this, "printer.cfg detected; starting Klippy")
-                    startPersistentKlippy(stableMapping, helper, lines)
-                    publishStatus(
-                        "AndroidKlipper host\n\n" + lines.joinToString("\n\n")
-                    )
-                    return@execute
+                    val missingIncludes = missingConfigIncludes(configPath)
+                    if (missingIncludes == null) {
+                        val before = configTreeFingerprint(configPath.parentFile)
+                        Thread.sleep(CONFIG_UPLOAD_SETTLE_MS)
+                        val after = configTreeFingerprint(configPath.parentFile)
+                        val afterMissing = missingConfigIncludes(configPath)
+                        if (before == after && afterMissing == null) {
+                            val lines = cleanBase.toMutableList()
+                            lines += "printer.cfg and referenced includes are present: starting Klippy automatically."
+                            HostDiagnostics.log(
+                                this,
+                                "printer.cfg include preflight complete and files stable; starting Klippy"
+                            )
+                            startPersistentKlippy(stableMapping, helper, lines)
+                            publishStatus(
+                                "AndroidKlipper host\n\n" + lines.joinToString("\n\n")
+                            )
+                            return@execute
+                        }
+                        continue
+                    }
+
+                    val waitReason =
+                        "Klippy WAITING: config upload is incomplete; waiting for $missingIncludes"
+                    if (waitReason != lastWaitReason) {
+                        lastWaitReason = waitReason
+                        HostDiagnostics.log(this, waitReason)
+                        publishStatus(
+                            "AndroidKlipper host\n\n" +
+                                (cleanBase + waitReason).joinToString("\n\n")
+                        )
+                    }
                 }
                 Thread.sleep(FIRST_CONFIG_POLL_MS)
             }
@@ -324,6 +387,7 @@ class KlipperHostService : Service() {
     }
 
     private fun startMoonraker(statusLines: MutableList<String>): Boolean {
+        setMoonrakerReady(false)
         publishStatus(
             "AndroidKlipper host\n\n" +
                 statusLines.joinToString("\n\n") +
@@ -335,9 +399,11 @@ class KlipperHostService : Service() {
             try {
                 val runner = Python.getInstance().getModule("moonraker_runner")
                 val result = runner.callAttr("run", filesDir.absolutePath).toString()
+                setMoonrakerReady(false)
                 HostDiagnostics.log(this, "Moonraker worker returned: $result")
                 publishStatus("Moonraker stopped\n\n$result")
             } catch (t: Throwable) {
+                setMoonrakerReady(false)
                 HostDiagnostics.log(
                     this,
                     "Moonraker worker ERROR ${t.javaClass.simpleName}: ${t.message}"
@@ -351,6 +417,7 @@ class KlipperHostService : Service() {
                 Socket().use { socket ->
                     socket.connect(InetSocketAddress("127.0.0.1", 7125), 200)
                 }
+                setMoonrakerReady(true)
                 statusLines += "Moonraker READY: http://127.0.0.1:7125"
                 return true
             } catch (_: Throwable) {
@@ -372,6 +439,7 @@ class KlipperHostService : Service() {
         helper: File,
         statusLines: MutableList<String>
     ): Boolean {
+        setKlippyReady(false)
         val klippySocket = File(filesDir, "printer_data/comms/klippy.sock")
         publishStatus(
             "AndroidKlipper host\n\n" +
@@ -392,6 +460,7 @@ class KlipperHostService : Service() {
                     deviceDisplayName()
                 ).toString()
                 firmwareRestartRequested = result.contains("firmware_restart")
+                setKlippyReady(false)
                 HostDiagnostics.log(this, "Klippy worker returned: $result")
                 if (firmwareRestartRequested) {
                     publishStatus("Firmware restart: rebinding Android USB sessions…")
@@ -399,6 +468,7 @@ class KlipperHostService : Service() {
                     publishStatus("Klippy stopped\n\n$result")
                 }
             } catch (t: Throwable) {
+                setKlippyReady(false)
                 HostDiagnostics.log(
                     this,
                     "Klippy worker ERROR ${t.javaClass.simpleName}: ${t.message}"
@@ -426,17 +496,20 @@ class KlipperHostService : Service() {
                             .callAttr("get_status").toString()
                     }.getOrElse { "" }
                     if (runtimeStatus.startsWith("ready:")) {
+                        setKlippyReady(true)
                         statusLines += "Klippy READY: ${runtimeStatus.removePrefix("ready:").trim()}"
                         return true
                     }
                     if (runtimeStatus.startsWith("error:") ||
                         runtimeStatus.startsWith("shutdown:")
                     ) {
+                        setKlippyReady(false)
                         statusLines += "Klippy state: $runtimeStatus"
                         return true
                     }
                     Thread.sleep(100)
                 }
+                setKlippyReady(false)
                 statusLines += "Klippy state: starting"
                 return true
             }
@@ -447,6 +520,7 @@ class KlipperHostService : Service() {
             Python.getInstance().getModule("persistent_host")
                 .callAttr("get_status").toString()
         }.getOrElse { "status unavailable: ${it.message}" }
+        setKlippyReady(false)
         statusLines +=
             "Klippy ERROR: API socket did not appear.\nKlippy runtime: $klippyStatus"
         return false
@@ -595,6 +669,14 @@ class KlipperHostService : Service() {
         if (wasHeld) HostDiagnostics.log(this, "wake lock released")
     }
 
+    private fun setMoonrakerReady(ready: Boolean) {
+        servicePrefs.edit().putBoolean(KEY_MOONRAKER_READY, ready).apply()
+    }
+
+    private fun setKlippyReady(ready: Boolean) {
+        servicePrefs.edit().putBoolean(KEY_KLIPPY_READY, ready).apply()
+    }
+
     private fun publishStatus(text: String) {
         HostStatusStore.save(this, text)
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
@@ -667,6 +749,8 @@ class KlipperHostService : Service() {
             "service onDestroy begin persistent=${persistentHostActive.get()} sessions=${sessions.size}"
         )
         persistentHostActive.set(false)
+        setMoonrakerReady(false)
+        setKlippyReady(false)
         if (Python.isStarted()) {
             val python = Python.getInstance()
             runCatching { python.getModule("moonraker_runner").callAttr("stop") }
@@ -698,6 +782,8 @@ class KlipperHostService : Service() {
         const val KEY_AUTO_KIOSK_PENDING = "auto_kiosk_pending"
         private const val PREF_SERVICE_STATE = "service_state"
         private const val KEY_DESIRED_REAL_HOST = "desired_real_host"
+        private const val KEY_MOONRAKER_READY = "moonraker_ready"
+        private const val KEY_KLIPPY_READY = "klippy_ready"
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
         private const val USB_REOPEN_SETTLE_MS = 250L
@@ -705,6 +791,7 @@ class KlipperHostService : Service() {
         private const val FIRMWARE_REENUM_TIMEOUT_MS = 15_000L
         private const val FIRMWARE_REENUM_POLL_MS = 100L
         private const val FIRST_CONFIG_POLL_MS = 500L
+        private const val CONFIG_UPLOAD_SETTLE_MS = 1_000L
 
         fun start(
             context: Context,
@@ -713,7 +800,11 @@ class KlipperHostService : Service() {
         ) {
             if (realConfig) {
                 context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
-                    .edit().putBoolean(KEY_DESIRED_REAL_HOST, true).apply()
+                    .edit()
+                    .putBoolean(KEY_DESIRED_REAL_HOST, true)
+                    .putBoolean(KEY_MOONRAKER_READY, false)
+                    .putBoolean(KEY_KLIPPY_READY, false)
+                    .apply()
             }
             HostDiagnostics.log(
                 context,
@@ -729,7 +820,11 @@ class KlipperHostService : Service() {
 
         fun stop(context: Context) {
             context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
-                .edit().putBoolean(KEY_DESIRED_REAL_HOST, false).apply()
+                .edit()
+                .putBoolean(KEY_DESIRED_REAL_HOST, false)
+                .putBoolean(KEY_MOONRAKER_READY, false)
+                .putBoolean(KEY_KLIPPY_READY, false)
+                .apply()
             HostDiagnostics.log(context, "service stop requested")
             context.stopService(Intent(context, KlipperHostService::class.java))
         }
@@ -737,5 +832,13 @@ class KlipperHostService : Service() {
         fun isPersistentHostDesired(context: Context): Boolean =
             context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
                 .getBoolean(KEY_DESIRED_REAL_HOST, false)
+
+        fun isMoonrakerReady(context: Context): Boolean =
+            context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
+                .getBoolean(KEY_MOONRAKER_READY, false)
+
+        fun isKlippyReady(context: Context): Boolean =
+            context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
+                .getBoolean(KEY_KLIPPY_READY, false)
     }
 }

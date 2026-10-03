@@ -1,18 +1,17 @@
 package dev.nozzlenaut.androidklipper
 
-import android.Manifest
 import android.app.Activity
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -28,6 +27,7 @@ import java.io.File
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var setupGuide: TextView
+    private lateinit var mainsailButton: Button
     private lateinit var autoStartButton: Button
     private lateinit var advancedControls: LinearLayout
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
@@ -37,11 +37,24 @@ class MainActivity : Activity() {
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.getStringExtra(KlipperHostService.EXTRA_STATUS)?.let { report ->
-                status.text = report
-                updateSetupGuide(report)
-                maybeOpenAutoKiosk(report)
+            intent?.getStringExtra(KlipperHostService.EXTRA_STATUS)?.let {
+                handleStatusReport(it)
             }
+        }
+    }
+
+    private fun handleStatusReport(report: String) {
+        status.text = report
+        updateSetupGuide()
+        maybeOpenAutoKiosk()
+        if (automationPrefs.getBoolean(
+                KlipperHostService.KEY_AUTO_KIOSK_PENDING, false
+            ) &&
+            (report.contains("Host startup ERROR") ||
+                report.contains("Moonraker ERROR") ||
+                report.startsWith("USB bridge error"))
+        ) {
+            clearAutoStartState()
         }
     }
 
@@ -54,6 +67,17 @@ class MainActivity : Activity() {
             automationPrefs.edit()
                 .putBoolean(KlipperHostService.KEY_AUTO_START_USB, true)
                 .apply()
+        }
+        // KEY_AUTO_START_IN_PROGRESS is only a duplicate-start guard. If the
+        // activity/process died before the service was actually requested, do
+        // not let that persisted bit strand the next launch in a permanent
+        // "already starting" state.
+        if (automationPrefs.getBoolean(
+                KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false
+            ) &&
+            !KlipperHostService.isPersistentHostDesired(this)
+        ) {
+            clearAutoStartState()
         }
 
         val root = LinearLayout(this).apply {
@@ -80,8 +104,9 @@ class MainActivity : Activity() {
             setPadding(0, 16, 0, 20)
         }
 
-        val kiosk = Button(this).apply {
+        mainsailButton = Button(this).apply {
             text = "Open Mainsail"
+            isEnabled = false
             setOnClickListener {
                 startActivity(Intent(this@MainActivity, MainsailActivity::class.java))
             }
@@ -91,7 +116,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 KlipperHostService.stop(this@MainActivity)
                 status.text = "AndroidKlipper host stopped."
-                updateSetupGuide(status.text.toString())
+                updateSetupGuide()
             }
         }
         val advancedToggle = Button(this).apply {
@@ -162,18 +187,17 @@ class MainActivity : Activity() {
         root.addView(heading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(intro, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(setupGuide, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        root.addView(kiosk)
+        root.addView(mainsailButton)
         root.addView(stop)
         root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(advancedToggle)
         root.addView(advancedControls)
         setContentView(ScrollView(this).apply { addView(root) })
 
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 44)
-        }
+        // Keep first-run focused on printer USB. Android 13+ allows a
+        // foreground service to start without POST_NOTIFICATIONS; asking for
+        // notifications here can stack a second system dialog on top of the
+        // USB permission chain and make initial setup flaky/confusing.
 
         updateSetupGuide()
         when {
@@ -193,10 +217,6 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        HostStatusStore.load(this)?.let {
-            status.text = it
-            updateSetupGuide(it)
-        } ?: updateSetupGuide()
         val filter = IntentFilter(KlipperHostService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -204,6 +224,14 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             registerReceiver(statusReceiver, filter)
         }
+
+        // A system USB permission dialog (or a brief app switch) can hide this
+        // activity while the service reaches Moonraker READY. Replaying the
+        // stored report through the same state handler makes that transition
+        // deterministic even if its live broadcast was missed.
+        HostStatusStore.load(this)?.let {
+            handleStatusReport(it)
+        } ?: updateSetupGuide()
     }
 
     override fun onStop() {
@@ -223,16 +251,17 @@ class MainActivity : Activity() {
                 if (isAutoStartEnabled()) "ON" else "OFF"
     }
 
-    private fun updateSetupGuide(report: String? = HostStatusStore.load(this)) {
+    private fun updateSetupGuide() {
         val supported = supportedUsbDevices()
         val permissionsGranted =
             supported.isNotEmpty() && supported.all { usbManager.hasPermission(it) }
-        val moonrakerReady = report?.contains("Moonraker READY:") == true
+        // These are latched by the service rather than inferred from the
+        // latest status sentence. Klippy errors/restarts must not make a healthy
+        // Moonraker/Mainsail instance appear to disappear from the walkthrough.
+        val moonrakerReady = KlipperHostService.isMoonrakerReady(this)
+        mainsailButton.isEnabled = moonrakerReady
         val configPresent = File(filesDir, "printer_data/config/printer.cfg").exists()
-        // Only mark this complete when the host publishes an explicit
-        // READY state. A Klippy API socket can exist while config validation is
-        // still in error, so socket presence alone is not enough.
-        val klippyReady = report?.contains("Klippy READY:") == true
+        val klippyReady = KlipperHostService.isKlippyReady(this)
 
         fun mark(done: Boolean) = if (done) "✓" else "•"
 
@@ -290,21 +319,37 @@ class MainActivity : Activity() {
             .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, true)
             .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, true)
             .apply()
-        status.text = "Printer USB detected. Starting AndroidKlipper…"
-        updateSetupGuide(status.text.toString())
-        requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
+        status.text = "Printer USB detected. Waiting briefly for all printer USB devices…"
+        updateSetupGuide()
+
+        // Multi-MCU printers are often behind a USB hub. One child can trigger
+        // USB_DEVICE_ATTACHED before its siblings finish enumerating. A short
+        // settle window makes the permission scan deterministic and avoids
+        // starting the host with only part of the printer present.
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (automationPrefs.getBoolean(
+                    KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false
+                )
+            ) {
+                requestUsbPermissionsAndStart(fullSmoke = false, realConfig = true)
+            }
+        }, USB_ATTACH_SETTLE_MS)
     }
 
-    private fun maybeOpenAutoKiosk(report: String) {
-        if (!report.contains("Moonraker READY:")) return
+    private fun clearAutoStartState() {
+        automationPrefs.edit()
+            .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
+            .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
+            .apply()
+    }
+
+    private fun maybeOpenAutoKiosk() {
+        if (!KlipperHostService.isMoonrakerReady(this)) return
         if (!automationPrefs.getBoolean(
                 KlipperHostService.KEY_AUTO_KIOSK_PENDING, false
             )
         ) return
-        automationPrefs.edit()
-            .putBoolean(KlipperHostService.KEY_AUTO_KIOSK_PENDING, false)
-            .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
-            .apply()
+        clearAutoStartState()
         startActivity(Intent(this, MainsailActivity::class.java))
     }
 
@@ -345,7 +390,8 @@ class MainActivity : Activity() {
 
         val devices = usbManager.deviceList.values.toList()
         if (devices.isEmpty()) {
-            status.text = "Waiting for printer USB."
+            status.text = "Printer USB disappeared before startup. Reconnect the printer."
+            clearAutoStartState()
             updateSetupGuide()
             return
         }
@@ -353,6 +399,7 @@ class MainActivity : Activity() {
         val supported = devices.filter { UsbDeviceScanner.isSupported(it) }
         if (supported.isEmpty()) {
             status.text = "USB device detected, but no supported serial interface was found."
+            clearAutoStartState()
             updateSetupGuide()
             return
         }
@@ -360,14 +407,9 @@ class MainActivity : Activity() {
 
         if (next == null) {
             KlipperHostService.start(this, fullSmoke, realConfig)
-            if (realConfig && automationPrefs.getBoolean(
-                    KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false
-                )
-            ) {
-                automationPrefs.edit()
-                    .putBoolean(KlipperHostService.KEY_AUTO_START_IN_PROGRESS, false)
-                    .apply()
-            }
+            // Keep the auto-start guard armed until Moonraker is actually READY.
+            // This prevents late USB attach events from launching a second startup
+            // while the first host is still opening PTYs and identifying MCUs.
             updateSetupGuide()
         } else {
             UsbPermissionReceiver.requestNext(
@@ -382,7 +424,11 @@ class MainActivity : Activity() {
                 fullSmoke -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the smoke test."
                 else -> "Grant USB access. AndroidKlipper will request each remaining printer MCU automatically, then start the host test."
             }
-            updateSetupGuide(status.text.toString())
+            updateSetupGuide()
         }
+    }
+
+    companion object {
+        private const val USB_ATTACH_SETTLE_MS = 750L
     }
 }
