@@ -102,7 +102,11 @@ class KlipperHostService : Service() {
             )
             return START_STICKY
         }
-        if (realConfig) persistentHostActive.set(true)
+        if (realConfig) {
+            setMoonrakerReady(false)
+            setKlippyReady(false)
+            persistentHostActive.set(true)
+        }
 
         hostExecutor.execute {
             try {
@@ -802,8 +806,6 @@ class KlipperHostService : Service() {
                 context.getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
                     .edit()
                     .putBoolean(KEY_DESIRED_REAL_HOST, true)
-                    .putBoolean(KEY_MOONRAKER_READY, false)
-                    .putBoolean(KEY_KLIPPY_READY, false)
                     .apply()
             }
             HostDiagnostics.log(
