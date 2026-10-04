@@ -164,6 +164,34 @@ class MainActivity : Activity() {
             }
         }
         updateAutoStartButton()
+        val keepMainsailAwake = Button(this).apply {
+            fun refreshLabel() {
+                text = "Keep Mainsail display awake: " +
+                    if (automationPrefs.getBoolean(
+                            KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, true
+                        )
+                    ) "ON" else "OFF"
+            }
+            refreshLabel()
+            setOnClickListener {
+                val enabled = !automationPrefs.getBoolean(
+                    KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, true
+                )
+                automationPrefs.edit()
+                    .putBoolean(KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, enabled)
+                    .apply()
+                refreshLabel()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (enabled) {
+                        "Mainsail will keep the display awake"
+                    } else {
+                        "Mainsail will allow normal screen timeout"
+                    },
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
         val copy = Button(this).apply {
             text = "Copy diagnostic report"
             setOnClickListener { copyReport() }
@@ -180,6 +208,7 @@ class MainActivity : Activity() {
         advancedControls.addView(scan)
         advancedControls.addView(realConfig)
         advancedControls.addView(autoStartButton)
+        advancedControls.addView(keepMainsailAwake)
         advancedControls.addView(copy)
         advancedControls.addView(test)
         advancedControls.addView(smoke)

@@ -1,6 +1,7 @@
 package dev.nozzlenaut.androidklipper
 
 import android.app.Activity
+import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
@@ -13,9 +14,19 @@ class MainsailActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The G2 suspends USB host traffic when the display actually sleeps.
-        // Keep the kiosk awake; brightness can still be set very low by the user.
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Some Android devices suspend or destabilize USB host traffic when the
+        // display sleeps; others can keep printing safely and save meaningful
+        // battery by allowing normal screen timeout. Keep the old behavior by
+        // default, but make it a user-selectable compatibility setting.
+        val keepScreenAwake = getSharedPreferences(
+            KlipperHostService.PREF_AUTOMATION,
+            Context.MODE_PRIVATE
+        ).getBoolean(KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, true)
+        if (keepScreenAwake) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or

@@ -775,6 +775,7 @@ class KlipperHostService : Service() {
         const val KEY_AUTO_START_USB = "auto_start_usb"
         const val KEY_AUTO_START_IN_PROGRESS = "auto_start_in_progress"
         const val KEY_AUTO_KIOSK_PENDING = "auto_kiosk_pending"
+        const val KEY_KEEP_MAINSAIL_SCREEN_AWAKE = "keep_mainsail_screen_awake"
         private const val PREF_SERVICE_STATE = "service_state"
         private const val KEY_DESIRED_REAL_HOST = "desired_real_host"
         private const val KEY_MOONRAKER_READY = "moonraker_ready"
