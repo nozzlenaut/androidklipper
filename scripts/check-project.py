@@ -28,6 +28,8 @@ assert "android.hardware.usb.action.USB_DEVICE_ATTACHED" in manifest
 assert "@xml/device_filter" in manifest
 assert 'android:launchMode="singleTop"' in manifest
 assert 'android.permission.WAKE_LOCK' in manifest
+assert 'android.permission.CHANGE_NETWORK_STATE' in manifest
+assert 'android:process=":mainsail"' in manifest
 assert 'android:stopWithTask="false"' in manifest
 assert 'android:allowBackup="false"' in manifest
 
@@ -49,7 +51,8 @@ assert 'Settings.Global.getString(contentResolver, "device_name")' in service
 assert "override fun onTaskRemoved" in service
 assert "servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)" in service
 assert "acquireHostWakeLock()" in service
-assert 'notification("Klipper host running")' in service
+assert 'onTaskRemoved: foreground host left running in place' in service
+assert 'onTaskRemoved foreground refresh failed' not in service
 persistent_host = (root / "app/src/main/python/persistent_host.py").read_text()
 assert '"hostname": str(device_name).strip() or "AndroidKlipper"' in persistent_host
 assert 'armeabi-v7a' in build and 'arm64-v8a' in build
