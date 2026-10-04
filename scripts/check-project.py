@@ -143,6 +143,9 @@ assert "Waiting for printer USB." in main_activity
 assert "Show advanced / troubleshooting" in main_activity
 assert "Keep Mainsail display awake:" in main_activity
 assert "KEY_KEEP_MAINSAIL_SCREEN_AWAKE" in main_activity
+assert "Battery optimization: CHECK SETTINGS" in main_activity
+assert "ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS" in main_activity
+assert "isIgnoringBatteryOptimizations" in main_activity
 assert "updateSetupGuide" in main_activity
 assert "KEY_AUTO_START_USB, true" in main_activity
 assert "supportedUsbDevices().isNotEmpty() && isAutoStartEnabled()" in main_activity

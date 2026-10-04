@@ -12,6 +12,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -192,6 +194,22 @@ class MainActivity : Activity() {
                 ).show()
             }
         }
+        val batteryOptimization = Button(this).apply {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val exempt = powerManager.isIgnoringBatteryOptimizations(packageName)
+            text = if (exempt) {
+                "Battery optimization: EXEMPT"
+            } else {
+                "Battery optimization: CHECK SETTINGS"
+            }
+            setOnClickListener {
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }.onFailure {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            }
+        }
         val copy = Button(this).apply {
             text = "Copy diagnostic report"
             setOnClickListener { copyReport() }
@@ -209,6 +227,7 @@ class MainActivity : Activity() {
         advancedControls.addView(realConfig)
         advancedControls.addView(autoStartButton)
         advancedControls.addView(keepMainsailAwake)
+        advancedControls.addView(batteryOptimization)
         advancedControls.addView(copy)
         advancedControls.addView(test)
         advancedControls.addView(smoke)
