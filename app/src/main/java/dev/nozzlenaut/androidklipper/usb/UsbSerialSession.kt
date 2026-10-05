@@ -7,6 +7,7 @@ import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
+import dev.nozzlenaut.androidklipper.transport.McuSession
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -14,10 +15,10 @@ import java.util.concurrent.atomic.AtomicLong
 class UsbSerialSession(
     private val driver: UsbSerialDriver,
     private val connection: UsbDeviceConnection,
-    val stableId: String,
-    val pty: PtyBridge,
+    override val stableId: String,
+    override val pty: PtyBridge,
     private val onError: (Throwable) -> Unit
-) : SerialInputOutputManager.Listener, AutoCloseable {
+) : SerialInputOutputManager.Listener, McuSession {
 
     private val running = AtomicBoolean(false)
     private var port: UsbSerialPort? = null
@@ -31,7 +32,7 @@ class UsbSerialSession(
     private val writeRetryCount = AtomicLong(0)
     private val maxWriteTransferUs = AtomicLong(0)
 
-    fun start() {
+    override fun start() {
         try {
             val serialPort = driver.ports.firstOrNull()
                 ?: throw IOException("USB serial device has no ports")
@@ -231,7 +232,7 @@ class UsbSerialSession(
         runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND) }
     }
 
-    fun statsSnapshot(): String = stats()
+    override fun statsSnapshot(): String = stats()
 
     private fun stats(): String =
         "rx=${rxBytes.get()} tx=${txBytes.get()} " +
