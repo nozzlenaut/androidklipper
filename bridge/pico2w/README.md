@@ -1,4 +1,4 @@
-# Pico 2 W AndroidKlipper Bridge (proof of concept)
+# Pico W / Pico 2 W AndroidKlipper Bridge (proof of concept)
 
 This firmware turns a Raspberry Pi Pico 2 W into a tiny network USB bridge for
 AndroidKlipper.
@@ -12,7 +12,7 @@ Mainsail stay on Android.
 
 ## Hardware
 
-- Raspberry Pi Pico 2 W
+- Raspberry Pi Pico W **or** Pico 2 W
 - Micro-USB OTG adapter for the Pico's USB connector
 - Powered USB hub for the printer MCUs
 - Regulated 5 V from the printer electronics bay
@@ -44,7 +44,7 @@ printer 5 V and a PC USB cable at the same time unless the power path is isolate
 
 ## Build
 
-Requires Raspberry Pi Pico SDK 2.x with Pico 2 W support.
+Requires Raspberry Pi Pico SDK 2.x. The same source builds for both Pico W (`pico_w`) and Pico 2 W (`pico2_w`).
 
 ```bash
 cd bridge/pico2w
@@ -79,3 +79,18 @@ prove that three USB MCUs can survive Klipper traffic over Wi-Fi.
 7. Long print before declaring the transport production-ready.
 
 See `../PROTOCOL.md` for the network contract.
+
+
+## Flashing for non-programmers
+
+1. Unplug the Pico.
+2. Hold the **BOOTSEL** button on the Pico.
+3. While holding BOOTSEL, plug its Micro-USB cable into a computer.
+4. Release BOOTSEL.
+5. A USB drive named **RPI-RP2** appears.
+6. Drag the matching UF2 onto that drive:
+   - **Pico W** -> `androidklipper_bridge-pico_w.uf2`
+   - **Pico 2 W** -> `androidklipper_bridge-pico2_w.uf2`
+7. The drive disappears and the Pico reboots automatically.
+
+No programmer, Arduino IDE, or terminal is required to flash a built UF2.
