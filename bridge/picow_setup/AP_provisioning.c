@@ -71,6 +71,7 @@ static void read_credentials(void);
 
 static void attempt_wifi_connection(void);
 static void poll_serial_provision(void);
+static void scan_target_network(void);
 
 static const char *connect_from_saved_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
 static const char *save_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
@@ -102,6 +103,49 @@ static const char *ssi_tags[] = {
 
 #define AP_SSID "AndroidKlipper-Setup"
 #define AP_PASSWORD "androidklipper"
+
+static volatile bool target_scan_found = false;
+
+static int target_scan_result(void *env, const cyw43_ev_scan_result_t *result) {
+    (void)env;
+    if (result == NULL) return 0;
+
+    if (strncmp((const char *)result->ssid, ssid, sizeof(result->ssid)) == 0) {
+        target_scan_found = true;
+        printf(
+            "Target visible: SSID=\"%s\" RSSI=%d channel=%u auth=%u BSSID=%02x:%02x:%02x:%02x:%02x:%02x\n",
+            result->ssid,
+            result->rssi,
+            result->channel,
+            result->auth_mode,
+            result->bssid[0], result->bssid[1], result->bssid[2],
+            result->bssid[3], result->bssid[4], result->bssid[5]
+        );
+    }
+    return 0;
+}
+
+static void scan_target_network(void) {
+    target_scan_found = false;
+    cyw43_wifi_scan_options_t options = {0};
+
+    int err = cyw43_wifi_scan(&cyw43_state, &options, NULL, target_scan_result);
+    if (err != 0) {
+        printf("Diagnostic scan failed to start rc=%d\n", err);
+        return;
+    }
+
+    printf("Diagnostic scan started for SSID \"%s\"\n", ssid);
+    absolute_time_t deadline = make_timeout_time_ms(12000);
+    while (cyw43_wifi_scan_active(&cyw43_state) && !time_reached(deadline)) {
+        cyw43_arch_poll();
+        sleep_ms(20);
+    }
+
+    if (!target_scan_found) {
+        printf("Target NOT visible in scan: SSID=\"%s\"\n", ssid);
+    }
+}
 
 // Report IP results and exit
 static void iperf_report(void *arg, enum lwiperf_report_type report_type,
@@ -247,6 +291,7 @@ int main() {
             int rc = cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, WIFI_CONNECT_TIME_S * 1000);
             if (rc) {
                 printf("failed to connect with credentials rc=%d\n", rc);
+                scan_target_network();
                 // Leave the AP up; just drop the failed STA attempt and restore
                 // the AP as the default netif so the portal keeps working.
                 cyw43_arch_disable_sta_mode();
