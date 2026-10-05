@@ -70,6 +70,7 @@ static void save_credentials(const char *new_ssid, const char *new_password);
 static void read_credentials(void);
 
 static void attempt_wifi_connection(void);
+static void poll_serial_provision(void);
 
 static const char *connect_from_saved_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
 static const char *save_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
@@ -229,6 +230,8 @@ int main() {
 
             services_up = true;
         }
+
+        poll_serial_provision();
 
         if (connect_requested) {
             // The user submitted credentials (via a CGI handler). Attempt the
@@ -430,6 +433,64 @@ static void attempt_wifi_connection(void) {
     // change radio mode here: this runs in lwIP/network context, and all
     // cyw43 mode transitions are owned by the main loop where polling happens.
     connect_requested = true;
+}
+
+
+static void poll_serial_provision(void) {
+    static char line[160];
+    static size_t used = 0;
+
+    while (true) {
+        int ch = getchar_timeout_us(0);
+        if (ch == PICO_ERROR_TIMEOUT) {
+            return;
+        }
+
+        if (ch == '\r') {
+            continue;
+        }
+
+        if (ch == '\n') {
+            line[used] = '\0';
+
+            const char prefix[] = "PROVISION\t";
+            if (strncmp(line, prefix, sizeof(prefix) - 1) == 0) {
+                char *ssid_start = line + sizeof(prefix) - 1;
+                char *tab = strchr(ssid_start, '\t');
+
+                if (tab != NULL) {
+                    *tab = '\0';
+                    const char *password_start = tab + 1;
+
+                    strncpy(ssid, ssid_start, sizeof(ssid) - 1);
+                    ssid[sizeof(ssid) - 1] = '\0';
+                    strncpy(password, password_start, sizeof(password) - 1);
+                    password[sizeof(password) - 1] = '\0';
+
+                    if (ssid[0] != '\0') {
+                        printf("Serial provisioning received for SSID: %s\n", ssid);
+                        attempt_wifi_connection();
+                    } else {
+                        printf("Serial provisioning rejected empty SSID\n");
+                    }
+                } else {
+                    printf("Serial provisioning parse error\n");
+                }
+            }
+
+            used = 0;
+            line[0] = '\0';
+            continue;
+        }
+
+        if (used + 1 < sizeof(line)) {
+            line[used++] = (char)ch;
+        } else {
+            used = 0;
+            line[0] = '\0';
+            printf("Serial provisioning line too long\n");
+        }
+    }
 }
 
 // Decodes application/x-www-form-urlencoded text in place.
