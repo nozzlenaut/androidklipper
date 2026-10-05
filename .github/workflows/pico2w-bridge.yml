@@ -1,0 +1,39 @@
+name: Pico 2 W bridge build
+
+on:
+  push:
+    branches: [pico2w-bridge-poc]
+    paths:
+      - 'bridge/**'
+      - '.github/workflows/pico2w-bridge.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+
+      - name: Checkout Pico SDK 2.3.1
+        run: |
+          git clone --depth 1 --branch 2.3.1 https://github.com/raspberrypi/pico-sdk.git pico-sdk
+          git -C pico-sdk submodule update --init --recursive --depth 1
+
+      - name: Build
+        run: |
+          cmake -S bridge/pico2w -B bridge/pico2w/build             -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"             -DPICO_BOARD=pico2_w
+          cmake --build bridge/pico2w/build -j2
+
+      - name: Upload UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: androidklipper-pico2w-bridge
+          path: bridge/pico2w/build/androidklipper_bridge.uf2
+          if-no-files-found: error
+          retention-days: 3
