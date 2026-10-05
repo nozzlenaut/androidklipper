@@ -270,6 +270,8 @@ int main() {
             httpd_init();
             http_set_cgi_handlers(cgi_handlers, LWIP_ARRAYSIZE(cgi_handlers));
             http_set_ssi_handler(ssi_handler, ssi_tags, LWIP_ARRAYSIZE(ssi_tags));
+            lwiperf_start_tcp_server_default(&iperf_report, NULL);
+            printf("Benchmark server listening on TCP 5001\n");
             cyw43_arch_lwip_end();
 
             services_up = true;
