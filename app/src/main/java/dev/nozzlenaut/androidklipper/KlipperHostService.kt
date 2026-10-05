@@ -479,12 +479,66 @@ class KlipperHostService : Service() {
         )
         hostExecutor.execute {
             try {
-                // Klippy deliberately returned before Android's physical USB
-                // sessions are rebuilt. At this point there is no live print to
-                // preserve: FIRMWARE_RESTART has already ended the Klippy runtime.
+                // Capture the transport before closing it. A network bridge MCU reset
+                // is recovered by rediscovery; native Android USB still waits for local
+                // re-enumeration/permission exactly as before.
+                val bridgeTransport =
+                    sessions.any { it.statsSnapshot().startsWith("transport=bridge") }
+
                 sessions.forEach { runCatching { it.close() } }
                 sessions.clear()
                 Thread.sleep(FIRMWARE_REENUM_SETTLE_MS)
+
+                if (bridgeTransport) {
+                    val deadline =
+                        SystemClock.elapsedRealtime() + FIRMWARE_REENUM_TIMEOUT_MS
+                    var bridgeMcuCount = 0
+
+                    while (
+                        bridgeMcuCount < expectedDevices &&
+                        SystemClock.elapsedRealtime() < deadline
+                    ) {
+                        bridgeMcuCount = runCatching {
+                            BridgeDiscovery.discover(1200)
+                                .maxOfOrNull { it.mcus.size } ?: 0
+                        }.getOrDefault(0)
+
+                        if (bridgeMcuCount < expectedDevices) {
+                            Thread.sleep(FIRMWARE_REENUM_POLL_MS)
+                        }
+                    }
+
+                    if (bridgeMcuCount < expectedDevices) {
+                        HostDiagnostics.log(
+                            this,
+                            "firmware restart bridge recovery incomplete " +
+                                "devices=$bridgeMcuCount/$expectedDevices"
+                        )
+                        publishStatus(
+                            "Firmware restart needs attention: bridge reports " +
+                                "$bridgeMcuCount/$expectedDevices MCUs."
+                        )
+                        return@execute
+                    }
+
+                    if (!servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)) {
+                        HostDiagnostics.log(
+                            this,
+                            "firmware restart bridge recovery cancelled: " +
+                                "host no longer desired"
+                        )
+                        return@execute
+                    }
+
+                    HostDiagnostics.log(
+                        this,
+                        "firmware restart recovery rediscovered " +
+                            "$bridgeMcuCount bridge MCUs"
+                    )
+                    persistentHostActive.set(true)
+                    rebuildSessions(fullSmoke = false, realConfig = true)
+                    return@execute
+                }
 
                 val deadline = SystemClock.elapsedRealtime() + FIRMWARE_REENUM_TIMEOUT_MS
                 var supported = usbManager.deviceList.values
@@ -533,8 +587,6 @@ class KlipperHostService : Service() {
                     this,
                     "firmware restart recovery rebinding ${supported.size} MCU USB devices"
                 )
-                // Direct recovery bypasses onStartCommand(), so explicitly re-arm
-                // the duplicate-start guard before launching the replacement host.
                 persistentHostActive.set(true)
                 rebuildSessions(fullSmoke = false, realConfig = true)
             } catch (t: Throwable) {
