@@ -751,15 +751,21 @@ int main(void) {
         return 3;
     }
 
+#ifndef AK_USB_DIAGNOSTIC
     init_usb_host();
+#else
+    printf("USB diagnostic mode: host init skipped; stdio USB remains active\n");
+#endif
 
     while (true) {
+#ifndef AK_USB_DIAGNOSTIC
         // TinyUSB must be serviced frequently; Klipper traffic is latency-sensitive.
         tuh_task();
 
         // Descriptor reads use TinyUSB synchronous helpers, so do them outside
         // the TinyUSB callback itself.
         process_pending_mounts();
+#endif
 
         // Poll lwIP/CYW43 frequently and then move bytes in both directions.
         cyw43_arch_poll();
