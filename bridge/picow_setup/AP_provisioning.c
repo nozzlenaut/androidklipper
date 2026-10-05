@@ -72,6 +72,7 @@ static void read_credentials(void);
 static void attempt_wifi_connection(void);
 
 static const char *connect_from_saved_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
+static const char *save_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
 static const char *clear_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
 
 static u16_t ssi_handler(int iIndex, char *pcInsert, int iInsertLen
@@ -81,6 +82,7 @@ static u16_t ssi_handler(int iIndex, char *pcInsert, int iInsertLen
 );
 
 static tCGI cgi_handlers[] = {
+    { "/save.cgi", save_cgi_handler},
     { "/connect_from_saved.cgi", connect_from_saved_cgi_handler},
     {"/clear.cgi", clear_cgi_handler}
 };
@@ -545,6 +547,28 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_ur
         }
     }
     current_post_connection = NULL;
+}
+
+static const char *save_cgi_handler(__unused int iIndex, int iNumParams, char *pcParam[], char *pcValue[]) {
+    const char *ssid_raw = cgi_param("ssid", iNumParams, pcParam, pcValue);
+    const char *password_raw = cgi_param("password", iNumParams, pcParam, pcValue);
+
+    if (ssid_raw == NULL || password_raw == NULL) {
+        printf("save.cgi missing ssid/password\n");
+        return "/index.shtml";
+    }
+
+    url_decode(ssid, ssid_raw, sizeof(ssid));
+    url_decode(password, password_raw, sizeof(password));
+
+    if (ssid[0] == '\0') {
+        printf("save.cgi rejected empty SSID\n");
+        return "/index.shtml";
+    }
+
+    printf("Saving Wi-Fi credentials for SSID: %s\n", ssid);
+    attempt_wifi_connection();
+    return "/index.shtml";
 }
 
 static const char *connect_from_saved_cgi_handler(__unused int iIndex, int iNumParams, char *pcParam[], char *pcValue[]) {
