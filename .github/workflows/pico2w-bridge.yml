@@ -34,10 +34,28 @@ jobs:
           cp bridge/pico2w/build-pico_w/androidklipper_bridge.uf2 \
              androidklipper_bridge-pico_w.uf2
 
+      - name: Build pico_w diagnostic
+        run: |
+          cmake -S bridge/pico2w -B bridge/pico2w/build-pico_w-diag \
+            -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk" \
+            -DPICO_BOARD=pico_w \
+            -DAK_USB_DIAGNOSTIC=ON
+          cmake --build bridge/pico2w/build-pico_w-diag -j2
+          cp bridge/pico2w/build-pico_w-diag/androidklipper_bridge.uf2 \
+             androidklipper_bridge-pico_w-diag.uf2
+
       - name: Upload UF2
         uses: actions/upload-artifact@v4
         with:
           name: androidklipper-bridge-pico_w
           path: androidklipper_bridge-pico_w.uf2
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload diagnostic UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: androidklipper-bridge-pico_w-diag
+          path: androidklipper_bridge-pico_w-diag.uf2
           if-no-files-found: error
           retention-days: 3
