@@ -20,6 +20,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
+option(AK_USB_DIAGNOSTIC "Keep USB in device/stdio mode and skip host init" OFF)
+
 add_executable(androidklipper_bridge
   src/main.c
   ../picow_setup/dhcpserver/dhcpserver.c
@@ -38,8 +40,14 @@ target_link_libraries(androidklipper_bridge
   tinyusb_board
 )
 
-# The only USB controller is being used as a host. Diagnostics go to UART.
-pico_enable_stdio_usb(androidklipper_bridge 0)
-pico_enable_stdio_uart(androidklipper_bridge 1)
+if (AK_USB_DIAGNOSTIC)
+  target_compile_definitions(androidklipper_bridge PRIVATE AK_USB_DIAGNOSTIC=1)
+  pico_enable_stdio_usb(androidklipper_bridge 1)
+  pico_enable_stdio_uart(androidklipper_bridge 0)
+else()
+  # Production bridge: the only USB controller is used as host.
+  pico_enable_stdio_usb(androidklipper_bridge 0)
+  pico_enable_stdio_uart(androidklipper_bridge 1)
+endif()
 
 pico_add_extra_outputs(androidklipper_bridge)
