@@ -498,6 +498,20 @@ static void poll_serial_provision(void) {
         if (ch == '\n') {
             line[used] = '\0';
 
+            const char scan_prefix[] = "SCAN\t";
+            if (strncmp(line, scan_prefix, sizeof(scan_prefix) - 1) == 0) {
+                const char *requested_ssid = line + sizeof(scan_prefix) - 1;
+                if (requested_ssid[0] != '\0') {
+                    strncpy(ssid, requested_ssid, sizeof(ssid) - 1);
+                    ssid[sizeof(ssid) - 1] = '\0';
+                    printf("Serial scan requested for SSID: %s\n", ssid);
+                    scan_target_network();
+                }
+                used = 0;
+                line[0] = '\0';
+                continue;
+            }
+
             const char prefix[] = "PROVISION\t";
             if (strncmp(line, prefix, sizeof(prefix) - 1) == 0) {
                 char *ssid_start = line + sizeof(prefix) - 1;
