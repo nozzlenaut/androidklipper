@@ -10,9 +10,12 @@
 #include "lwip/tcp.h"
 #include "lwip/udp.h"
 #include "lwip/pbuf.h"
+#include "lwip/ip4_addr.h"
+#include "lwip/netif.h"
 
 #include "tusb.h"
 #include "bridge_config.h"
+#include "dhcpserver.h"
 
 #define LANGUAGE_ID          0x0409
 #define RING_SIZE            8192
@@ -20,6 +23,9 @@
 #define NET_IO_CHUNK         1024
 #define DISCOVERY_BUF_SIZE   1024
 #define INVALID_CDC_INDEX    0xff
+
+_Static_assert(AK_MAX_MCUS == 3, "This bridge build is intentionally sized for three Klipper MCUs");
+_Static_assert(CFG_TUH_CDC >= AK_MAX_MCUS, "TinyUSB CDC host slots must cover every bridge MCU");
 
 typedef struct {
     uint8_t data[RING_SIZE];
@@ -66,6 +72,7 @@ static bool g_device_desc_valid[CFG_TUH_DEVICE_MAX + 1];
 
 static struct udp_pcb *g_discovery_udp;
 static char g_bridge_id[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1];
+static dhcp_server_t g_dhcp_server;
 
 CFG_TUH_MEM_SECTION static uint16_t g_serial_desc[64];
 
@@ -637,27 +644,35 @@ static bool start_network_services(void) {
     return true;
 }
 
-static bool connect_wifi(void) {
-    if (strcmp(AK_WIFI_SSID, "CHANGE_ME") == 0) {
-        printf("Set AK_WIFI_SSID / AK_WIFI_PASSWORD in bridge_config.h first.\n");
-        return false;
-    }
+static bool start_bridge_ap(void) {
+    cyw43_arch_enable_ap_mode(
+        AK_AP_SSID,
+        AK_AP_PASSWORD,
+        CYW43_AUTH_WPA2_AES_PSK);
 
-    cyw43_arch_enable_sta_mode();
+#if LWIP_IPV6
+#define AK_IP4(x) ((x).u_addr.ip4)
+#else
+#define AK_IP4(x) (x)
+#endif
+    ip4_addr_t gateway;
+    ip4_addr_t mask;
+    AK_IP4(gateway).addr = PP_HTONL(CYW43_DEFAULT_IP_AP_ADDRESS);
+    AK_IP4(mask).addr = PP_HTONL(CYW43_DEFAULT_IP_MASK);
+#undef AK_IP4
 
-    printf("Connecting Wi-Fi to %s...\n", AK_WIFI_SSID);
-    const int rc = cyw43_arch_wifi_connect_timeout_ms(
-        AK_WIFI_SSID,
-        AK_WIFI_PASSWORD,
-        CYW43_AUTH_WPA2_AES_PSK,
-        30000);
+    cyw43_arch_lwip_begin();
+    dhcp_server_init(
+        &g_dhcp_server,
+        &cyw43_state.netif[CYW43_ITF_AP],
+        (ip_addr_t *)&gateway,
+        (ip_addr_t *)&mask);
+    netif_set_default(&cyw43_state.netif[CYW43_ITF_AP]);
+    cyw43_arch_lwip_end();
 
-    if (rc) {
-        printf("Wi-Fi connect failed: %d\n", rc);
-        return false;
-    }
-
-    printf("Wi-Fi connected. AndroidKlipper discovery UDP=%u, MCU TCP=%u-%u\n",
+    const char *ip = ip4addr_ntoa(netif_ip4_addr(&cyw43_state.netif[CYW43_ITF_AP]));
+    printf("Bridge AP ready: SSID=%s IP=%s\n", AK_AP_SSID, ip);
+    printf("AndroidKlipper discovery UDP=%u, MCU TCP=%u-%u\n",
            AK_DISCOVERY_PORT,
            AK_MCU_BASE_PORT,
            AK_MCU_BASE_PORT + AK_MAX_MCUS - 1);
@@ -714,7 +729,7 @@ int main(void) {
 
     pico_get_unique_board_id_string(g_bridge_id, sizeof(g_bridge_id));
 
-    printf("\nAndroidKlipper Pico 2 W Bridge %s\n", AK_FIRMWARE_VERSION);
+    printf("\nAndroidKlipper Pico W Bridge %s\n", AK_FIRMWARE_VERSION);
     printf("Bridge ID: %s\n", g_bridge_id);
 
     if (cyw43_arch_init()) {
@@ -722,9 +737,9 @@ int main(void) {
         return 1;
     }
 
-    while (!connect_wifi()) {
-        printf("Retrying Wi-Fi in 5 seconds...\n");
-        sleep_ms(5000);
+    if (!start_bridge_ap()) {
+        printf("Bridge AP startup failed\n");
+        return 2;
     }
 
     cyw43_arch_lwip_begin();
@@ -733,7 +748,7 @@ int main(void) {
 
     if (!network_ok) {
         printf("Network service startup failed\n");
-        return 2;
+        return 3;
     }
 
     init_usb_host();
