@@ -13,8 +13,8 @@ extern "C" {
 #define CFG_TUH_ENABLED             1
 #define CFG_TUD_ENABLED             0
 
-// One hub plus up to three Klipper MCUs.
-#define CFG_TUH_HUB                 1
+// Two hubs (external powered hub + printer-side hub) plus up to three Klipper MCUs.
+#define CFG_TUH_HUB                 2
 #define CFG_TUH_DEVICE_MAX          5
 
 // Leave enough CDC slots for the three target MCUs plus one diagnostic extra.
