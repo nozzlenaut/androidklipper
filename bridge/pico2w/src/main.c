@@ -367,7 +367,7 @@ static void utf16_descriptor_to_ascii(const uint16_t *desc, char *out, size_t ou
 
 static bool read_serial(uint8_t daddr, char *serial, size_t serial_len) {
     memset(g_serial_desc, 0, sizeof(g_serial_desc));
-    const tusb_xfer_result_t result =
+    const xfer_result_t result =
         tuh_descriptor_get_serial_string_sync(
             daddr, LANGUAGE_ID, g_serial_desc, sizeof(g_serial_desc));
 
