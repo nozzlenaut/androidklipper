@@ -204,11 +204,18 @@ int main() {
     if (try_connect) {
         // First, try to connect to network using one of the saved credentials
         // the idea is that once you have saved credentials wifi should "just work"
-        for (int i = 0; i < num_credentials; i++) {
-            if (i == 0) cyw43_arch_enable_sta_mode();
+        // Prefer the newest saved network first. Re-enable STA for every
+        // attempt because a failed connect tears it down before trying the next
+        // credential.
+        for (int i = num_credentials - 1; i >= 0; i--) {
+            cyw43_arch_enable_sta_mode();
             printf("Trying to connect with STA \"%s\" at index %d\n", ssid_list[i], i);
-            int rc = cyw43_arch_wifi_connect_timeout_ms(ssid_list[i], password_list[i], CYW43_AUTH_WPA2_AES_PSK, WIFI_CONNECT_TIME_S * 1000);
-            if (rc) { 
+            int rc = cyw43_arch_wifi_connect_timeout_ms(
+                ssid_list[i],
+                password_list[i],
+                CYW43_AUTH_WPA2_AES_PSK,
+                WIFI_CONNECT_TIME_S * 1000);
+            if (rc) {
                 printf("failed to connect with saved credentials rc=%d\n", rc);
                 cyw43_arch_disable_sta_mode();
             } else {
