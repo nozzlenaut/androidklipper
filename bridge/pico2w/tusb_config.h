@@ -5,9 +5,6 @@
 extern "C" {
 #endif
 
-#ifndef CFG_TUSB_MCU
-#define CFG_TUSB_MCU                OPT_MCU_RP2350
-#endif
 #ifndef CFG_TUSB_OS
 #define CFG_TUSB_OS                 OPT_OS_NONE
 #endif
