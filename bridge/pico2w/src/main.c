@@ -16,6 +16,7 @@
 #include "tusb.h"
 #include "bridge_config.h"
 #include "dhcpserver.h"
+#include "wifi_credentials.h"
 
 #define LANGUAGE_ID          0x0409
 #define RING_SIZE            8192
@@ -644,6 +645,37 @@ static bool start_network_services(void) {
     return true;
 }
 
+static bool connect_saved_wifi(void) {
+    char ssid[33] = {0};
+    char password[64] = {0};
+
+    if (!ak_wifi_credentials_read_last(
+            ssid, sizeof(ssid), password, sizeof(password))) {
+        printf("No saved Wi-Fi credentials; using bridge AP fallback\n");
+        return false;
+    }
+
+    printf("Trying saved Wi-Fi SSID: %s\n", ssid);
+    cyw43_arch_enable_sta_mode();
+
+    int rc = cyw43_arch_wifi_connect_timeout_ms(
+        ssid,
+        password,
+        CYW43_AUTH_WPA2_AES_PSK,
+        20000);
+
+    if (rc != 0) {
+        printf("Saved Wi-Fi connect failed rc=%d; using bridge AP fallback\n", rc);
+        cyw43_arch_disable_sta_mode();
+        return false;
+    }
+
+    const ip4_addr_t *addr = netif_ip4_addr(&cyw43_state.netif[CYW43_ITF_STA]);
+    printf("Bridge joined Wi-Fi: SSID=%s IP=%s\n", ssid, ip4addr_ntoa(addr));
+    netif_set_default(&cyw43_state.netif[CYW43_ITF_STA]);
+    return true;
+}
+
 static bool start_bridge_ap(void) {
     cyw43_arch_enable_ap_mode(
         AK_AP_SSID,
@@ -737,9 +769,12 @@ int main(void) {
         return 1;
     }
 
-    if (!start_bridge_ap()) {
-        printf("Bridge AP startup failed\n");
-        return 2;
+    const bool using_home_wifi = connect_saved_wifi();
+    if (!using_home_wifi) {
+        if (!start_bridge_ap()) {
+            printf("Bridge AP startup failed\n");
+            return 2;
+        }
     }
 
     cyw43_arch_lwip_begin();
@@ -752,6 +787,9 @@ int main(void) {
     }
 
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+    printf(
+        "Network mode: %s\n",
+        using_home_wifi ? "home Wi-Fi STA" : "bridge AP fallback");
 
 #ifndef AK_USB_DIAGNOSTIC
     init_usb_host();
