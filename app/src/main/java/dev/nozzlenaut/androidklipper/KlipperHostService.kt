@@ -267,13 +267,17 @@ class KlipperHostService : Service() {
 
                 bridge.mcus.forEachIndexed { index, mcu ->
                     val stableId = mcu.serial
+                    // Protocol v1 assigns bridge MCU slots to fixed TCP ports
+                    // 7131..7133. Use the slot index as the source of truth so
+                    // an invalid/zero advertised port can never reach Socket.connect().
+                    val bridgePort = BRIDGE_MCU_BASE_PORT + index
                     try {
                         val pty = PtyBridge.create()
                         val session = NetworkSerialSession(
                             stableId = stableId,
                             pty = pty,
                             address = bridge.address,
-                            port = mcu.port
+                            port = bridgePort
                         ) { error ->
                             HostDiagnostics.log(
                                 this,
@@ -301,7 +305,7 @@ class KlipperHostService : Service() {
 
                         statusLines += buildString {
                             append("MCU ${index + 1}: AndroidKlipper Bridge\n")
-                            append("  transport: TCP ${bridge.address.hostAddress}:${mcu.port}\n")
+                            append("  transport: TCP ${bridge.address.hostAddress}:$bridgePort (advertised ${mcu.port})\n")
                             append("  id: $stableId\n")
                             append("  PTY: ${pty.slavePath}\n")
                             append("  Pipe: $pipeProbe\n")
@@ -810,6 +814,7 @@ class KlipperHostService : Service() {
         private const val NOTIFICATION_ID = 7714
         private const val USB_REOPEN_SETTLE_MS = 250L
         private const val BRIDGE_DISCOVERY_TIMEOUT_MS = 2500
+        private const val BRIDGE_MCU_BASE_PORT = 7131
         private const val EXPECTED_PRINTER_MCUS = 3
         private const val FIRMWARE_REENUM_SETTLE_MS = 500L
         private const val FIRMWARE_REENUM_TIMEOUT_MS = 15_000L
