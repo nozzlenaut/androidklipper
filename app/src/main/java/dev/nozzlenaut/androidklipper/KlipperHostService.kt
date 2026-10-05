@@ -17,6 +17,7 @@ import android.os.Process
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
+import dev.nozzlenaut.androidklipper.transport.McuSession
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
 import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
@@ -30,7 +31,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class KlipperHostService : Service() {
-    private val sessions = CopyOnWriteArrayList<UsbSerialSession>()
+    private val sessions = CopyOnWriteArrayList<McuSession>()
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
     private val hostExecutor = Executors.newSingleThreadExecutor { task ->
         Thread({
