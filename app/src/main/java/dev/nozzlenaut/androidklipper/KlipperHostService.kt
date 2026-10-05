@@ -17,6 +17,8 @@ import android.os.Process
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
+import dev.nozzlenaut.androidklipper.net.BridgeDiscovery
+import dev.nozzlenaut.androidklipper.net.NetworkSerialSession
 import dev.nozzlenaut.androidklipper.transport.McuSession
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
@@ -170,72 +172,151 @@ class KlipperHostService : Service() {
             device to driver
         }
 
-        supported.forEachIndexed { index, (device, driver) ->
-            try {
-                val connection = usbManager.openDevice(device)
-                    ?: error("UsbManager.openDevice returned null")
-                // Fire OS can intermittently stop exposing one MCU serial after
-                // the CDC device has been reopened. Cache every successful stable ID
-                // by the current USB device path so subsequent opens in the same USB
-                // enumeration keep the real Klipper serial instead of degrading to a
-                // VID:PID:path fallback.
-                val stableIdPrefs = getSharedPreferences("usb_stable_ids", Context.MODE_PRIVATE)
-                val cacheKey = device.deviceName
-                val serial = runCatching { device.serialNumber }.getOrNull()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: runCatching { connection.serial }.getOrNull()
-                        ?.takeIf { it.isNotBlank() }
-                val stableId = if (serial != null) {
-                    stableIdPrefs.edit().putString(cacheKey, serial).apply()
-                    serial
-                } else {
-                    stableIdPrefs.getString(cacheKey, null)
-                        ?.takeIf { it.isNotBlank() }
-                        ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
-                }
-                val pty = PtyBridge.create()
-                val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
-                    HostDiagnostics.log(
-                        this,
-                        "USB bridge error for $stableId: ${error.javaClass.simpleName}: ${error.message}"
-                    )
-                    publishStatus("USB bridge error for $stableId: ${error.message}")
-                }
-                session.start()
-                sessions += session
+        var expectedMcuCount = 0
+        var allLikelyKlipper = false
 
-                val pipeProbe = hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
-                val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
-                    hostprobe.callAttr(
-                        "probe_mcu_identify",
-                        pty.slavePath,
-                        helper.absolutePath,
-                        115200
-                    ).toString().also {
-                        // Only arm a PTY for full/real Klippy after the MCU has
-                        // actually completed Klipper identify successfully.
-                        smokePtyPaths += pty.slavePath
-                        stablePtyMap[stableId] = pty.slavePath
+        if (supported.isNotEmpty()) {
+            expectedMcuCount = supported.size
+            allLikelyKlipper =
+                supported.all { (device, _) -> UsbDeviceScanner.isLikelyKlipper(device) }
+
+            supported.forEachIndexed { index, (device, driver) ->
+                try {
+                    val connection = usbManager.openDevice(device)
+                        ?: error("UsbManager.openDevice returned null")
+                    // Fire OS can intermittently stop exposing one MCU serial after
+                    // the CDC device has been reopened. Cache every successful stable ID
+                    // by the current USB device path so subsequent opens in the same USB
+                    // enumeration keep the real Klipper serial instead of degrading to a
+                    // VID:PID:path fallback.
+                    val stableIdPrefs = getSharedPreferences("usb_stable_ids", Context.MODE_PRIVATE)
+                    val cacheKey = device.deviceName
+                    val serial = runCatching { device.serialNumber }.getOrNull()
+                        ?.takeIf { it.isNotBlank() }
+                        ?: runCatching { connection.serial }.getOrNull()
+                            ?.takeIf { it.isNotBlank() }
+                    val stableId = if (serial != null) {
+                        stableIdPrefs.edit().putString(cacheKey, serial).apply()
+                        serial
+                    } else {
+                        stableIdPrefs.getString(cacheKey, null)
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
                     }
-                } else {
-                    "Klipper identify skipped: unknown serial device"
-                }
+                    val pty = PtyBridge.create()
+                    val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
+                        HostDiagnostics.log(
+                            this,
+                            "USB bridge error for $stableId: ${error.javaClass.simpleName}: ${error.message}"
+                        )
+                        publishStatus("USB bridge error for $stableId: ${error.message}")
+                    }
+                    session.start()
+                    sessions += session
 
-                statusLines += buildString {
-                    append("MCU ${index + 1}: ${device.productName ?: driver.javaClass.simpleName}\n")
-                    append("  id: $stableId\n")
-                    append("  PTY: ${pty.slavePath}\n")
-                    append("  Pipe: $pipeProbe\n")
-                    append("  Protocol: $identifyProbe")
+                    val pipeProbe = hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
+                    val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
+                        hostprobe.callAttr(
+                            "probe_mcu_identify",
+                            pty.slavePath,
+                            helper.absolutePath,
+                            115200
+                        ).toString().also {
+                            smokePtyPaths += pty.slavePath
+                            stablePtyMap[stableId] = pty.slavePath
+                        }
+                    } else {
+                        "Klipper identify skipped: unknown serial device"
+                    }
+
+                    statusLines += buildString {
+                        append("MCU ${index + 1}: ${device.productName ?: driver.javaClass.simpleName}\n")
+                        append("  transport: Android USB\n")
+                        append("  id: $stableId\n")
+                        append("  PTY: ${pty.slavePath}\n")
+                        append("  Pipe: $pipeProbe\n")
+                        append("  Protocol: $identifyProbe")
+                    }
+                } catch (t: Throwable) {
+                    statusLines += "${device.productName ?: device.deviceName}: ERROR ${t.javaClass.simpleName}: ${t.message}"
                 }
-            } catch (t: Throwable) {
-                statusLines += "${device.productName ?: device.deviceName}: ERROR ${t.javaClass.simpleName}: ${t.message}"
+            }
+        } else {
+            val bridge = runCatching {
+                BridgeDiscovery.discover(BRIDGE_DISCOVERY_TIMEOUT_MS)
+                    .filter { it.mcus.isNotEmpty() }
+                    .maxByOrNull { it.mcus.size }
+            }.onFailure {
+                HostDiagnostics.log(
+                    this,
+                    "bridge discovery ERROR ${it.javaClass.simpleName}: ${it.message}"
+                )
+            }.getOrNull()
+
+            if (bridge == null) {
+                statusLines +=
+                    "No local USB MCUs and no AndroidKlipper Bridge discovered on Wi-Fi."
+            } else {
+                expectedMcuCount = bridge.mcus.size
+                allLikelyKlipper = expectedMcuCount > 0
+                statusLines +=
+                    "Bridge: ${bridge.bridgeId} firmware=${bridge.firmware} " +
+                    "host=${bridge.address.hostAddress} mcus=${bridge.mcus.size}"
+
+                bridge.mcus.forEachIndexed { index, mcu ->
+                    val stableId = mcu.serial
+                    try {
+                        val pty = PtyBridge.create()
+                        val session = NetworkSerialSession(
+                            stableId = stableId,
+                            pty = pty,
+                            address = bridge.address,
+                            port = mcu.port
+                        ) { error ->
+                            HostDiagnostics.log(
+                                this,
+                                "Network bridge error for $stableId: " +
+                                    "${error.javaClass.simpleName}: ${error.message}"
+                            )
+                            publishStatus(
+                                "Network bridge error for $stableId: ${error.message}"
+                            )
+                        }
+                        session.start()
+                        sessions += session
+
+                        val pipeProbe =
+                            hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
+                        val identifyProbe = hostprobe.callAttr(
+                            "probe_mcu_identify",
+                            pty.slavePath,
+                            helper.absolutePath,
+                            115200
+                        ).toString().also {
+                            smokePtyPaths += pty.slavePath
+                            stablePtyMap[stableId] = pty.slavePath
+                        }
+
+                        statusLines += buildString {
+                            append("MCU ${index + 1}: AndroidKlipper Bridge\n")
+                            append("  transport: TCP ${bridge.address.hostAddress}:${mcu.port}\n")
+                            append("  id: $stableId\n")
+                            append("  PTY: ${pty.slavePath}\n")
+                            append("  Pipe: $pipeProbe\n")
+                            append("  Protocol: $identifyProbe")
+                        }
+                    } catch (t: Throwable) {
+                        statusLines +=
+                            "Bridge MCU $stableId: ERROR ${t.javaClass.simpleName}: ${t.message}"
+                    }
+                }
             }
         }
 
-        val allLikelyKlipper = supported.isNotEmpty() &&
-            supported.all { (device, _) -> UsbDeviceScanner.isLikelyKlipper(device) }
-        val allIdentified = smokePtyPaths.size == supported.size && allLikelyKlipper
+        val allIdentified =
+            expectedMcuCount > 0 &&
+                smokePtyPaths.size == expectedMcuCount &&
+                allLikelyKlipper
 
         if (realConfig) {
             if (!allIdentified || stablePtyMap.size != supported.size) {
@@ -674,6 +755,7 @@ class KlipperHostService : Service() {
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
         private const val USB_REOPEN_SETTLE_MS = 250L
+        private const val BRIDGE_DISCOVERY_TIMEOUT_MS = 2500
         private const val FIRMWARE_REENUM_SETTLE_MS = 500L
         private const val FIRMWARE_REENUM_TIMEOUT_MS = 15_000L
         private const val FIRMWARE_REENUM_POLL_MS = 100L
