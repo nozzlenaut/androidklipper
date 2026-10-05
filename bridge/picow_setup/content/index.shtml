@@ -16,7 +16,7 @@
 <div class="card">
   <h1>AndroidKlipper Bridge</h1>
   <p>Choose the Wi-Fi network that the Android device and bridge will share.</p>
-  <form action="/credentials.cgi" method="post">
+  <form action="/save.cgi" method="get">
     <label for="ssid">Wi-Fi name</label>
     <input type="text" id="ssid" name="ssid" maxlength="32" required>
     <label for="password">Wi-Fi password</label>
