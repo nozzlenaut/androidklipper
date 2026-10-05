@@ -1,0 +1,67 @@
+name: Android bridge fast build
+
+on:
+  push:
+    branches: [pico2w-bridge-poc]
+    paths:
+      - 'app/**'
+      - 'scripts/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/android-bridge-fast.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK/NDK pieces
+        run: |
+          sdkmanager             "platforms;android-35"             "build-tools;35.0.0"             "ndk;27.2.12479018"             "cmake;3.22.1"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Vendor pinned Klipper
+        run: bash scripts/vendor-klipper.sh
+
+      - name: Vendor pinned Moonraker
+        run: bash scripts/vendor-moonraker.sh
+
+      - name: Static project checks
+        run: python3 scripts/check-project.py
+
+      - name: Unit tests and debug APK
+        run: gradle --stacktrace :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Inspect packaged APK
+        run: bash scripts/inspect-apk.sh
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: androidklipper-bridge-fast-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 1
