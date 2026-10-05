@@ -1,4 +1,4 @@
-name: Pico 2 W bridge build
+name: Pico W bridge build
 
 on:
   push:
@@ -10,6 +10,9 @@ on:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        board: [pico_w, pico2_w]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -25,15 +28,19 @@ jobs:
           git clone --depth 1 --branch 2.3.1 https://github.com/raspberrypi/pico-sdk.git pico-sdk
           git -C pico-sdk submodule update --init --recursive --depth 1
 
-      - name: Build
+      - name: Build ${{ matrix.board }}
         run: |
-          cmake -S bridge/pico2w -B bridge/pico2w/build             -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"             -DPICO_BOARD=pico2_w
-          cmake --build bridge/pico2w/build -j2
+          cmake -S bridge/pico2w -B bridge/pico2w/build-${{ matrix.board }} \
+            -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk" \
+            -DPICO_BOARD=${{ matrix.board }}
+          cmake --build bridge/pico2w/build-${{ matrix.board }} -j2
+          cp bridge/pico2w/build-${{ matrix.board }}/androidklipper_bridge.uf2 \
+             androidklipper_bridge-${{ matrix.board }}.uf2
 
       - name: Upload UF2
         uses: actions/upload-artifact@v4
         with:
-          name: androidklipper-pico2w-bridge
-          path: bridge/pico2w/build/androidklipper_bridge.uf2
+          name: androidklipper-bridge-${{ matrix.board }}
+          path: androidklipper_bridge-${{ matrix.board }}.uf2
           if-no-files-found: error
           retention-days: 3
