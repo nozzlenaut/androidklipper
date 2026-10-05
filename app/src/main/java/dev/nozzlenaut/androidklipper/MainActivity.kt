@@ -21,6 +21,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
+import dev.nozzlenaut.androidklipper.net.BridgeDiscovery
 import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
 
 class MainActivity : Activity() {
@@ -64,7 +65,7 @@ class MainActivity : Activity() {
             setPadding(0, 24, 0, 24)
         }
         val scan = Button(this).apply {
-            text = "Scan USB"
+            text = "Scan USB / Pico bridge"
             setOnClickListener { scanUsb() }
         }
         val test = Button(this).apply {
@@ -226,10 +227,8 @@ class MainActivity : Activity() {
 
     private fun scanUsb() {
         val found = UsbDeviceScanner.describeDevices(usbManager)
-        status.text = if (found.isEmpty()) {
-            "No USB devices found."
-        } else {
-            buildString {
+        if (found.isNotEmpty()) {
+            status.text = buildString {
                 append("USB devices found: ${found.size}\n\n")
                 found.forEachIndexed { index, d ->
                     append("${index + 1}. ${d.productName ?: d.deviceName}\n")
@@ -238,7 +237,28 @@ class MainActivity : Activity() {
                     append("   driver: ${d.driverName ?: "not detected"}\n\n")
                 }
             }
+            return
         }
+
+        status.text = "No local USB. Looking for AndroidKlipper Pico bridge…"
+        Thread {
+            val bridges = runCatching { BridgeDiscovery.discover(2500) }.getOrDefault(emptyList())
+            runOnUiThread {
+                status.text = if (bridges.isEmpty()) {
+                    "No local USB devices and no Pico bridge found."
+                } else {
+                    bridges.joinToString("\n\n") { bridge ->
+                        "Pico bridge ${bridge.bridgeId.takeLast(8)}\n" +
+                            "  host: ${bridge.address.hostAddress}\n" +
+                            "  firmware: ${bridge.firmware}\n" +
+                            "  MCUs: ${bridge.mcus.size}/3\n" +
+                            bridge.mcus.joinToString("\n") {
+                                "    ${it.serial} -> TCP ${it.port}"
+                            }
+                    }
+                }
+            }
+        }.start()
     }
 
     private fun copyReport() {
@@ -259,12 +279,33 @@ class MainActivity : Activity() {
             .apply()
 
         val devices = usbManager.deviceList.values.toList()
-        if (devices.isEmpty()) {
-            status.text = "No USB devices found."
+        val supported = devices.filter { UsbDeviceScanner.isSupported(it) }
+
+        if (supported.isEmpty()) {
+            status.text = "Looking for AndroidKlipper Pico bridge…"
+            Thread {
+                val bridge = runCatching {
+                    BridgeDiscovery.discover(2500)
+                        .filter { it.mcus.size >= 3 }
+                        .maxByOrNull { it.mcus.size }
+                }.getOrNull()
+
+                runOnUiThread {
+                    if (bridge == null) {
+                        status.text =
+                            "No local Klipper USB devices and no Pico bridge " +
+                            "with all 3 MCUs was discovered."
+                    } else {
+                        status.text =
+                            "Pico bridge found: ${bridge.mcus.size} MCUs at " +
+                            "${bridge.address.hostAddress}. Starting host…"
+                        KlipperHostService.start(this, fullSmoke, realConfig)
+                    }
+                }
+            }.start()
             return
         }
 
-        val supported = devices.filter { UsbDeviceScanner.isSupported(it) }
         val next = supported.firstOrNull { !usbManager.hasPermission(it) }
 
         if (next == null) {
