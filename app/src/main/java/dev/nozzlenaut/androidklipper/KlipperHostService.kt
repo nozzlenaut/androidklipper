@@ -321,7 +321,7 @@ class KlipperHostService : Service() {
                 allLikelyKlipper
 
         if (realConfig) {
-            if (!allIdentified || stablePtyMap.size != supported.size) {
+            if (!allIdentified || stablePtyMap.size != expectedMcuCount) {
                 persistentHostActive.set(false)
                 releaseHostWakeLock()
                 HostDiagnostics.log(this, "persistent host skipped: MCU identify incomplete")
