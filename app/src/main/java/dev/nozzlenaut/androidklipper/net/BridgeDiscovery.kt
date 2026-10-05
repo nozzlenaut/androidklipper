@@ -37,7 +37,7 @@ object BridgeDiscovery {
             socket.broadcast = true
             socket.soTimeout = 150
 
-            broadcastTargets().forEach { target ->
+            (broadcastTargets() + local24UnicastTargets()).forEach { target ->
                 runCatching {
                     socket.send(
                         DatagramPacket(
@@ -90,6 +90,35 @@ object BridgeDiscovery {
                 .mapNotNull { it.broadcast }
                 .filterIsInstance<Inet4Address>()
                 .forEach { targets += it }
+        }
+
+        return targets
+    }
+
+
+    /**
+     * Some access points do not forward IPv4 broadcast cleanly between
+     * 5 GHz and 2.4 GHz clients even though normal unicast works. Probe
+     * the local /24 directly as a fallback so bridge discovery remains
+     * reliable on those WLANs.
+     */
+    private fun local24UnicastTargets(): Set<InetAddress> {
+        val targets = linkedSetOf<InetAddress>()
+
+        runCatching {
+            NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<Inet4Address>()
+                .filter { it.isSiteLocalAddress }
+                .forEach { local ->
+                    val octets = local.address.copyOf()
+                    for (host in 1..254) {
+                        if ((octets[3].toInt() and 0xff) == host) continue
+                        octets[3] = host.toByte()
+                        targets += InetAddress.getByAddress(octets.copyOf())
+                    }
+                }
         }
 
         return targets
