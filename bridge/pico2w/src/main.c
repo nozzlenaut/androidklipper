@@ -751,6 +751,8 @@ int main(void) {
         return 3;
     }
 
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+
 #ifndef AK_USB_DIAGNOSTIC
     init_usb_host();
 #else
@@ -767,9 +769,8 @@ int main(void) {
         process_pending_mounts();
 #endif
 
-        // Poll lwIP/CYW43 frequently and then move bytes in both directions.
-        cyw43_arch_poll();
-
+        // CYW43/lwIP runs in the SDK background context. Move bridge bytes
+        // under the lwIP lock; TinyUSB host remains serviced in the main loop.
         cyw43_arch_lwip_begin();
         pump_transport();
         cyw43_arch_lwip_end();
