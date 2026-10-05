@@ -260,7 +260,7 @@ class KlipperHostService : Service() {
                     "No local USB MCUs and no AndroidKlipper Bridge discovered on Wi-Fi."
             } else {
                 expectedMcuCount = bridge.mcus.size
-                allLikelyKlipper = expectedMcuCount > 0
+                allLikelyKlipper = expectedMcuCount == EXPECTED_PRINTER_MCUS
                 statusLines +=
                     "Bridge: ${bridge.bridgeId} firmware=${bridge.firmware} " +
                     "host=${bridge.address.hostAddress} mcus=${bridge.mcus.size}"
@@ -810,6 +810,7 @@ class KlipperHostService : Service() {
         private const val NOTIFICATION_ID = 7714
         private const val USB_REOPEN_SETTLE_MS = 250L
         private const val BRIDGE_DISCOVERY_TIMEOUT_MS = 2500
+        private const val EXPECTED_PRINTER_MCUS = 3
         private const val FIRMWARE_REENUM_SETTLE_MS = 500L
         private const val FIRMWARE_REENUM_TIMEOUT_MS = 15_000L
         private const val FIRMWARE_REENUM_POLL_MS = 100L
