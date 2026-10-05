@@ -216,6 +216,8 @@ class KlipperHostService : Service() {
 
                     val pipeProbe = hostprobe.callAttr("probe_pipe_open", pty.slavePath).toString()
                     val identifyProbe = if (UsbDeviceScanner.isLikelyKlipper(device)) {
+                        // Only arm a PTY for full/real Klippy after the MCU has
+                        // actually completed Klipper identify successfully.
                         hostprobe.callAttr(
                             "probe_mcu_identify",
                             pty.slavePath,
