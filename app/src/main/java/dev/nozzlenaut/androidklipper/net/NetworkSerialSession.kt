@@ -39,10 +39,14 @@ class NetworkSerialSession(
             require(port in 1..65535) {
                 "Invalid bridge TCP port $port for $stableId"
             }
+            // Resolve the remote endpoint before entering Socket.apply {}.
+            // Inside apply, bare `port` resolves to Socket.port (0 before connect)
+            // instead of this NetworkSerialSession's remote port.
+            val remoteEndpoint = InetSocketAddress(address, port)
             val connected = Socket().apply {
                 tcpNoDelay = true
                 keepAlive = true
-                connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)
+                connect(remoteEndpoint, CONNECT_TIMEOUT_MS)
             }
             socket = connected
 
