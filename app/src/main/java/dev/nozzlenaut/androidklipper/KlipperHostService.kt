@@ -270,7 +270,13 @@ class KlipperHostService : Service() {
                     // Protocol v1 assigns bridge MCU slots to fixed TCP ports
                     // 7131..7133. Use the slot index as the source of truth so
                     // an invalid/zero advertised port can never reach Socket.connect().
-                    val bridgePort = BRIDGE_MCU_BASE_PORT + index
+                    val bridgePort =
+                        mcu.port.takeIf {
+                            it in BRIDGE_MCU_BASE_PORT until
+                                (BRIDGE_MCU_BASE_PORT + EXPECTED_PRINTER_MCUS)
+                        } ?: (BRIDGE_MCU_BASE_PORT + index)
+                    statusLines +=
+                        "Bridge route $stableId: advertised=${mcu.port} selected=$bridgePort"
                     try {
                         val pty = PtyBridge.create()
                         val session = NetworkSerialSession(

@@ -36,6 +36,9 @@ class NetworkSerialSession(
         if (!running.compareAndSet(false, true)) return
 
         try {
+            require(port in 1..65535) {
+                "Invalid bridge TCP port $port for $stableId"
+            }
             val connected = Socket().apply {
                 tcpNoDelay = true
                 keepAlive = true
