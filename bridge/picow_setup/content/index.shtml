@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AndroidKlipper Bridge Setup</title>
+  <style>
+    body { font-family: sans-serif; max-width: 520px; margin: 2em auto; padding: 0 1em; background:#f6f6f6; }
+    .card { background:white; padding:1.25em; border-radius:12px; box-shadow:0 2px 12px #0002; }
+    h1 { margin-top:0; }
+    input { width:100%; box-sizing:border-box; font-size:1em; padding:.7em; margin:.35em 0 1em; }
+    button,input[type=submit] { width:100%; font-size:1em; padding:.8em; }
+    .small { opacity:.7; font-size:.9em; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>AndroidKlipper Bridge</h1>
+  <p>Choose the Wi-Fi network that the Android device and bridge will share.</p>
+  <form action="/credentials.cgi" method="post">
+    <label for="ssid">Wi-Fi name</label>
+    <input type="text" id="ssid" name="ssid" maxlength="32" required>
+    <label for="password">Wi-Fi password</label>
+    <input type="password" id="password" name="password" maxlength="63" required>
+    <input type="submit" value="Save & connect">
+  </form>
+
+  <p class="small">Credentials are stored only on this Pico W. The setup network will shut down after a successful connection.</p>
+
+  <form action="/clear.cgi" method="get">
+    <input type="submit" value="Clear saved Wi-Fi">
+  </form>
+
+  <p class="small">Saved networks:</p>
+  <form action="/connect_from_saved.cgi" method="get">
+    <!--#wifilist-->
+    <input type="submit" value="Connect saved network">
+  </form>
+</div>
+</body>
+</html>
