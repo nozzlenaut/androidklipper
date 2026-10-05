@@ -22,10 +22,12 @@ pico_sdk_init()
 
 add_executable(androidklipper_bridge
   src/main.c
+  ../picow_setup/dhcpserver/dhcpserver.c
 )
 
 target_include_directories(androidklipper_bridge PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}
+  ${CMAKE_CURRENT_LIST_DIR}/../picow_setup/dhcpserver
 )
 
 target_link_libraries(androidklipper_bridge
