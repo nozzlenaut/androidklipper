@@ -24,6 +24,7 @@ option(AK_USB_DIAGNOSTIC "Keep USB in device/stdio mode and skip host init" OFF)
 
 add_executable(androidklipper_bridge
   src/main.c
+  wifi_credentials.c
   ../picow_setup/dhcpserver/dhcpserver.c
 )
 
