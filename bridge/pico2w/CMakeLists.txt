@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 
 if (NOT DEFINED PICO_BOARD)
-  set(PICO_BOARD pico2_w CACHE STRING "Board type")
+  set(PICO_BOARD pico_w CACHE STRING "Board type")
 endif()
 
 if (NOT DEFINED PICO_SDK_PATH)
