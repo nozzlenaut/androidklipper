@@ -186,19 +186,19 @@ jobs:
           git clone --depth 1 --branch 2.3.1 https://github.com/raspberrypi/pico-sdk.git pico-sdk
           git -C pico-sdk submodule update --init --recursive --depth 1
 
-      - name: Build Pico 2 W bridge firmware
+      - name: Build Pico W bridge firmware
         run: |
-          cmake -S bridge/pico2w -B bridge/pico2w/build             -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"             -DPICO_BOARD=pico2_w
+          cmake -S bridge/pico2w -B bridge/pico2w/build             -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"             -DPICO_BOARD=pico_w
           cmake --build bridge/pico2w/build -j2
 
       - name: Show bridge firmware files
         run: |
           ls -lh bridge/pico2w/build/androidklipper_bridge.*
 
-      - name: Upload Pico 2 W bridge UF2
+      - name: Upload Pico W bridge UF2
         uses: actions/upload-artifact@v4
         with:
-          name: androidklipper-pico2w-bridge
+          name: androidklipper-picow-bridge
           path: bridge/pico2w/build/androidklipper_bridge.uf2
           if-no-files-found: error
           retention-days: 3
