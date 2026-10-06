@@ -7,7 +7,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbManager
-import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
@@ -632,24 +631,7 @@ class KlipperHostService : Service() {
         )
     }
 
-    private fun deviceDisplayName(): String {
-        // Prefer Android's user-visible device name when the vendor exposes it.
-        // Fall back to Build fields so Mainsail never has to call this "localhost".
-        val configured = runCatching {
-            android.provider.Settings.Global.getString(contentResolver, "device_name")
-        }.getOrNull()?.trim()?.takeIf {
-            it.isNotEmpty() && !it.equals("localhost", ignoreCase = true)
-        }
-        if (configured != null) return configured
-
-        val manufacturer = Build.MANUFACTURER.trim()
-        val model = Build.MODEL.trim()
-        if (model.isEmpty()) return manufacturer.ifEmpty { "AndroidKlipper" }
-        if (manufacturer.isEmpty() || model.startsWith(manufacturer, ignoreCase = true)) {
-            return model
-        }
-        return "$manufacturer $model"
-    }
+    private fun deviceDisplayName(): String = DeviceIdentity.displayName(this)
 
     private fun acquireHostWakeLock() {
         if (hostWakeLock?.isHeld == true) return

@@ -3,8 +3,6 @@ package dev.nozzlenaut.androidklipper
 import android.content.Context
 import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.net.URLDecoder
 
 class MainsailServer(
@@ -53,7 +51,7 @@ class MainsailServer(
             val requestHost = session.headers["host"]
                 ?.substringBefore(':')
                 ?.takeIf { it.isNotBlank() }
-            val hostname = requestHost ?: activeLanIpv4() ?: "127.0.0.1"
+            val hostname = requestHost ?: DeviceIdentity.activeLanIpv4() ?: "127.0.0.1"
             val json = """
                 {
                   "defaultLocale": "en",
@@ -123,19 +121,4 @@ class MainsailServer(
         else -> "application/octet-stream"
     }
 
-    private fun activeLanIpv4(): String? {
-        return runCatching {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .asSequence()
-                .filter { it.isUp && !it.isLoopback }
-                .flatMap { it.inetAddresses.toList().asSequence() }
-                .filterIsInstance<Inet4Address>()
-                .map { it.hostAddress }
-                .firstOrNull { address ->
-                    address.startsWith("10.") ||
-                        address.startsWith("192.168.") ||
-                        address.matches(Regex("""172\.(1[6-9]|2\d|3[01])\..*"""))
-                }
-        }.getOrNull()
-    }
 }

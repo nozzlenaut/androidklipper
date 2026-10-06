@@ -6,6 +6,7 @@ required = [
     "app/src/main/AndroidManifest.xml",
     "app/src/main/cpp/pty_bridge.cpp",
     "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt",
+    "app/src/main/java/dev/nozzlenaut/androidklipper/DeviceIdentity.kt",
     "app/src/main/java/dev/nozzlenaut/androidklipper/HostDiagnostics.kt",
     "app/src/main/java/dev/nozzlenaut/androidklipper/LocalStatusServer.kt",
     "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt",
@@ -45,7 +46,12 @@ assert 'version = "3.11"' in build
 
 service = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
 assert 'deviceDisplayName()' in service
-assert 'Settings.Global.getString(contentResolver, "device_name")' in service
+assert 'DeviceIdentity.displayName(this)' in service
+device_identity = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/DeviceIdentity.kt").read_text()
+assert 'Settings.Global.getString(context.contentResolver, "device_name")' in device_identity
+assert 'Build.MANUFACTURER' in device_identity
+assert 'Build.MODEL' in device_identity
+assert 'fun mainsailLanUrl()' in device_identity
 assert "override fun onTaskRemoved" in service
 assert "servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)" in service
 assert "acquireHostWakeLock()" in service
@@ -137,7 +143,11 @@ assert "klipperCount < 3" not in main_activity
 assert "supported.isEmpty()" in main_activity
 assert "maybeOpenAutoKiosk" in main_activity
 assert "Waiting for printer USB." in main_activity
-assert "Show advanced / troubleshooting" in main_activity
+assert "Show advanced / diagnostics" in main_activity
+assert "Host device:" in main_activity
+assert "Long prints require an Android device" in main_activity
+assert "Copy remote Mainsail address" in main_activity
+assert "DeviceIdentity.mainsailLanUrl()" in main_activity
 assert "updateSetupGuide" in main_activity
 assert "KEY_AUTO_START_USB, true" in main_activity
 assert "supportedUsbDevices().isNotEmpty() && isAutoStartEnabled()" in main_activity
@@ -315,6 +325,7 @@ assert 'implementation("org.nanohttpd:nanohttpd:2.3.1")' in build
 mainsail_server = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/MainsailServer.kt").read_text()
 assert 'port: Int = 8080' in mainsail_server
 assert '"hostname": "$hostname"' in mainsail_server
+assert "DeviceIdentity.activeLanIpv4()" in mainsail_server
 assert '"port": 7125' in mainsail_server
 assert 'uri.substringBefore(\'?\') == "/sw.js"' in mainsail_server
 assert "noCacheWorker" in mainsail_server

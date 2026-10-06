@@ -1,8 +1,8 @@
-# AndroidKlipper checkpoint
+# AndroidKlipper checkpoint — historical 2026-09-26
 
-Last updated: 2026-09-26
+This file preserves the v252 stability checkpoint as historical test evidence.
 
-This file is the current "where are we actually at?" checkpoint. It describes observed hardware behavior, not the version we wish we had.
+For the current generic first-run baseline, see `GENERIC_ONBOARDING_CHECKPOINT_2026-10-03.md` and the repository README. Do not use the "next gate" list below as the current project roadmap.
 
 ## Current working stack
 

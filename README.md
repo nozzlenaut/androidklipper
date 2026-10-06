@@ -1,70 +1,97 @@
 # AndroidKlipper
 
-AndroidKlipper is an experiment in turning an ordinary Android device into a real Klipper host.
+AndroidKlipper turns an ordinary Android device into a real Klipper host. It runs Klipper, Moonraker, and Mainsail locally and talks to printer MCUs directly over Android USB host/OTG.
 
-The goal is not "Mainsail in a WebView." The goal is to replace the Raspberry Pi-shaped part of a printer setup with hardware people already own or can buy cheaply: an old tablet, handheld, prepaid phone, or similar Android device.
+The core project is intentionally small: use cheap Android hardware in place of the Raspberry Pi-shaped part of a Klipper setup without forking Klipper into a proprietary appliance.
 
-## What works now
+## Stable core checkpoint
 
-The current development build runs the real stack on Android:
+The current release baseline is `generic-onboarding-stable-2026-10-03`.
 
-- direct USB communication with native Klipper MCUs
-- one Android PTY per MCU so upstream Klipper can use normal serial-style paths
+That checkpoint was tested from a clean Android install through:
+
+`install → connect printer USB → grant permissions → identify MCUs → start Moonraker → open Mainsail → upload config → wait for includes → start Klippy → READY → print`
+
+A clean Moto G (2024) test reached Mainsail, accepted the normal Voron config tree, reached READY, and successfully homed the printer. The proven G2 transport/timing path was preserved.
+
+## What works
+
+- generic USB discovery for supported Klipper/serial devices
+- multiple printer MCUs behind a USB hub
+- one Android PTY per MCU with stable USB identity mapping
 - embedded Klipper
 - embedded Moonraker
-- bundled Mainsail
-- local G-code storage, including removable storage when available
-- automatic USB permission/startup flow
-- optional auto-start of the real host and Mainsail kiosk
-- LAN access to Mainsail and Moonraker
-- foreground-service wake lock
-- Mainsail kiosk keeps the display awake on devices that suspend USB when the screen sleeps
+- bundled local Mainsail
+- persistent `AndroidKlipperDrive` storage for config, G-code, database, and backups
+- first-run config upload through Mainsail
+- waits for direct and nested config includes before starting Klippy
+- automatic Klippy start when the uploaded config tree is complete
+- USB auto-start and chained Android USB permission handling
+- local kiosk Mainsail plus LAN-accessible Mainsail/Moonraker
+- Android device name passed into Klipper as the host name
+- foreground-service wake lock and keep-screen-awake handling
+- battery telemetry
+- persistent diagnostics / flight recorder
 
-The USB transport deliberately lives at the Android edge. Klipper itself should stay as close to upstream as possible.
+The G2 stability checkpoint completed two sustained real prints plus long idle testing without Timer-too-close, Android USB write-retry, invalid-byte, or disconnect failures.
 
-## Current hardware checkpoint - 2026-09-26
+## Device power requirement
 
-Primary test device: Retroid Pocket G2, Android 15.
+USB host/OTG support is required to talk to the printer.
 
-Printer: Voron 2.4 350 with STM32F446 main MCU, RP2040 NHK/toolhead MCU, and RP2040 Eddy MCU.
+For long or unattended prints, the Android device must also support **charging while remaining in USB host mode** through the selected hub/adapter. USB-C, OTG support, and a powered hub do not guarantee this behavior.
 
-Build v252 completed a full Benchy in **1:17:34 of actual print time** (1:22:15 total job time including home/QGL/scan) with zero print stalls, zero invalid MCU bytes, no `Timer too close`, no lost-MCU shutdown, and no AndroidKlipper service teardown during the print. This cleared the previous v249 Benchy failure window at about 61:55.
+| Tested device | Printer USB | Charge while hosting printer USB | Current use |
+| --- | --- | --- | --- |
+| Retroid Pocket G2 | Yes | **Yes** | Best-tested long-running host |
+| Fire HD 8 (KFRAPWI) | Yes | **No with tested hardware** | Battery-powered prints |
+| Moto G (2024), XT2413V | Yes | **No with tested hardware** | Battery-powered prints |
 
-The successful run still had isolated USB retransmit bursts, including one larger main-MCU burst, so transport diagnostics stay enabled and repeated long runs still matter. The app now includes an Android-side flight recorder specifically so those events can be lined up with Klipper/Moonraker logs.
+A device which cannot charge while hosting USB can still run AndroidKlipper for prints which fit comfortably inside its battery runtime.
 
-The next immediate test is an untouched post-print idle soak. Metadata extraction is also still broken on Android, which is why Mainsail currently shows 0/0 layers and lacks normal ETA/thumbnail data.
+See `docs/COMPATIBILITY.md` for details.
 
-See `docs/CHECKPOINT.md` for the live checkpoint and `docs/TEST_RESULTS_2026-09-26_V252.md` for the full v252 run.
+## First run
 
-## Architecture in one paragraph
+1. Install and open AndroidKlipper.
+2. Connect the printer over USB OTG.
+3. Grant each Android USB permission prompt.
+4. AndroidKlipper starts Moonraker and makes Mainsail available.
+5. If `printer.cfg` is missing, upload your normal Klipper config files in Mainsail.
+6. AndroidKlipper waits for referenced includes and a stable config tree.
+7. Klippy starts automatically and reaches READY.
+8. Upload G-code and print.
 
-Android owns each physical USB device. AndroidKlipper forwards the raw Klipper byte stream through a native PTY. Embedded Klipper opens that PTY, Moonraker connects to Klipper's normal Unix socket, and Mainsail talks to Moonraker. The dynamic PTY number can change on every boot; the USB MCU's stable serial ID is what matters.
+The app shows the remote Mainsail LAN address once Moonraker is ready.
 
-## Important current limitations
+## Host names and temperature sensor labels
 
-- The working printer profile still expects Dalton's three known MCU serial IDs. That is a safety rail, not the final generic design.
-- Real-host startup still imports the source printer config from a configured Moonraker URL. A standalone cached-config boot path is still needed before this can honestly replace the old host with nothing else running.
-- Screen-off can suspend USB host traffic on some Android devices. The G2 currently works around that by keeping Mainsail's display technically awake.
-- USB detach/reconnect recovery is not automatic yet.
-- OTG + charging behavior varies wildly by device and hub/cable.
-- One long G2 print is proven; repeated long runs, post-print idle soak, and cross-device validation are still pending.
+AndroidKlipper passes the Android device's user-visible name (falling back to manufacturer/model) to Klipper as the host name.
 
-## Next milestones
+Klipper temperature-sensor section names still come from the user's config and are intentionally not silently rewritten. If a migrated config contains a legacy name such as `[temperature_sensor NUC Temp]`, rename that section in the config to the label you want Mainsail to display, for example `[temperature_sensor Android Host Temp]` or the actual device name.
 
-1. Finish the untouched post-print idle soak and capture a runtime checkpoint.
-2. Validate the staged in-process Moonraker metadata fix (layers, ETA, thumbnails/SVG) on the next APK.
-3. Persist/export Moonraker database history with the device/printer profile.
-4. Retest the same v252 transport on the Fire HD 8, then a cheap Moto G-class phone.
-5. Cache the raw printer config locally and replace the hard-coded three-MCU fixture with a saved printer profile.
-6. Add clean USB detach/reconnect recovery and better power diagnostics.
-7. Add camera support: built-in Android camera, USB webcam, and Mainsail/Moonraker viewing from another device.
+## Known limitations
+
+- USB detach/reconnect recovery is not yet fully automatic.
+- Some Android devices suspend USB when the display sleeps; kiosk mode keeps the display logically awake on affected hardware.
+- CH34x, CP210x, FTDI, and Prolific driver detection exists but native Klipper CDC USB remains the print-proven path.
+- The Android Moonraker metadata patch is present, but layer/ETA/thumbnail behavior still needs an explicit on-device validation checkpoint before it should be called proven.
+- Devices with duplicate/non-unique MCU USB serial identities still need a safe one-time mapping flow.
+- Camera support is a separate future feature and is not part of the v1 core.
+
+## Architecture
+
+Android owns each physical USB device. AndroidKlipper bridges each MCU byte stream into an Android PTY. Klipper opens those PTYs through a stable USB-identity map, Moonraker connects to Klipper's normal Unix socket, and Mainsail talks to Moonraker.
+
+The printer configuration stays user-owned. AndroidKlipper adapts the transport rather than silently rewriting printer behavior.
 
 ## Project rules
 
 - Do not silently modify the user's source printer config.
 - Prefer small Android compatibility patches over a permanent Klipper/Moonraker fork.
-- Stable USB identity matters more than `/dev/pts/N` numbering.
+- Stable USB identity matters more than PTY numbering.
 - Make failures loud and diagnosable instead of hiding them.
+- Do not weaken Klipper timing/safety thresholds to mask transport failures.
 - Keep the host useful without subscriptions or proprietary lock-in.
 
-The code tour in `docs/CODE_TOUR.md` is the easiest place to start if you're trying to understand the repo.
+See `docs/GENERIC_ONBOARDING_CHECKPOINT_2026-10-03.md` for the frozen clean-device test and `docs/CODE_TOUR.md` for the implementation tour.

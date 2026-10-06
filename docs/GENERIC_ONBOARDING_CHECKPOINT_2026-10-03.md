@@ -95,8 +95,9 @@ The runtime serial layer also supports common usb-serial-for-Android drivers, bu
 
 ### Cosmetic/UI
 
-- A legacy `NUC Temp` label is still visible in Mainsail and should be removed or generalized.
-- The setup UI can still be polished, but the core flow is considered checkpoint-worthy.
+- AndroidKlipper passes the Android device's user-visible name to Klipper as the host name.
+- Config-defined object labels remain user-owned. A legacy section such as `[temperature_sensor NUC Temp]` must be renamed in the Klipper config if a different Mainsail label is desired; AndroidKlipper intentionally does not silently rewrite it.
+- The v1 polish branch adds a clearer setup screen, explicit power guidance, and a copyable remote Mainsail address without changing the proven USB/timing path.
 
 ### Camera
 

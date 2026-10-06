@@ -28,6 +28,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var setupGuide: TextView
     private lateinit var mainsailButton: Button
+    private lateinit var mainsailLanAddress: TextView
+    private lateinit var copyMainsailAddressButton: Button
     private lateinit var autoStartButton: Button
     private lateinit var advancedControls: LinearLayout
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
@@ -89,10 +91,27 @@ class MainActivity : Activity() {
             textSize = 22f
             gravity = Gravity.CENTER_HORIZONTAL
         }
+        val deviceName = DeviceIdentity.displayName(this)
+        val hostSummary = TextView(this).apply {
+            text = "Host device: $deviceName"
+            textSize = 15f
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, 8, 0, 4)
+        }
         val intro = TextView(this).apply {
-            text = "Turn an Android device into a Klipper host. Follow the steps below; AndroidKlipper will handle USB startup and open Mainsail automatically."
+            text = "Connect the printer over USB, grant Android access, and AndroidKlipper will start Moonraker and Mainsail. On first setup, upload your normal Klipper config in Mainsail; Klippy starts automatically when the config tree is complete."
             textSize = 14f
-            setPadding(0, 16, 0, 12)
+            setPadding(0, 16, 0, 8)
+        }
+        val powerNote = TextView(this).apply {
+            text = "Long prints require an Android device and hub/adapter that can charge while the device remains in USB host mode."
+            textSize = 13f
+            setPadding(0, 0, 0, 16)
+        }
+        val setupHeading = TextView(this).apply {
+            text = "Setup"
+            textSize = 18f
+            setPadding(0, 4, 0, 4)
         }
         setupGuide = TextView(this).apply {
             textSize = 16f
@@ -111,23 +130,38 @@ class MainActivity : Activity() {
                 startActivity(Intent(this@MainActivity, MainsailActivity::class.java))
             }
         }
+        mainsailLanAddress = TextView(this).apply {
+            text = "Remote Mainsail: available after startup"
+            textSize = 13f
+            setPadding(0, 8, 0, 4)
+        }
+        copyMainsailAddressButton = Button(this).apply {
+            text = "Copy remote Mainsail address"
+            isEnabled = false
+            setOnClickListener { copyMainsailAddress() }
+        }
         val stop = Button(this).apply {
-            text = "Stop AndroidKlipper host"
+            text = "Stop host"
             setOnClickListener {
                 KlipperHostService.stop(this@MainActivity)
                 status.text = "AndroidKlipper host stopped."
                 updateSetupGuide()
             }
         }
+        val statusHeading = TextView(this).apply {
+            text = "Status"
+            textSize = 18f
+            setPadding(0, 16, 0, 0)
+        }
         val advancedToggle = Button(this).apply {
-            text = "Show advanced / troubleshooting"
+            text = "Show advanced / diagnostics"
             setOnClickListener {
                 val show = advancedControls.visibility != View.VISIBLE
                 advancedControls.visibility = if (show) View.VISIBLE else View.GONE
                 text = if (show) {
-                    "Hide advanced / troubleshooting"
+                    "Hide advanced / diagnostics"
                 } else {
-                    "Show advanced / troubleshooting"
+                    "Show advanced / diagnostics"
                 }
             }
         }
@@ -185,10 +219,16 @@ class MainActivity : Activity() {
         advancedControls.addView(smoke)
 
         root.addView(heading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.addView(hostSummary, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(intro, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.addView(powerNote, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.addView(setupHeading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(setupGuide, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(mainsailButton)
+        root.addView(mainsailLanAddress, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.addView(copyMainsailAddressButton)
         root.addView(stop)
+        root.addView(statusHeading, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(status, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(advancedToggle)
         root.addView(advancedControls)
@@ -260,6 +300,13 @@ class MainActivity : Activity() {
         // Moonraker/Mainsail instance appear to disappear from the walkthrough.
         val moonrakerReady = KlipperHostService.isMoonrakerReady(this)
         mainsailButton.isEnabled = moonrakerReady
+        val remoteMainsailUrl = DeviceIdentity.mainsailLanUrl()
+        mainsailLanAddress.text = when {
+            !moonrakerReady -> "Remote Mainsail: available after startup"
+            remoteMainsailUrl != null -> "Remote Mainsail: $remoteMainsailUrl"
+            else -> "Remote Mainsail: no LAN address detected"
+        }
+        copyMainsailAddressButton.isEnabled = moonrakerReady && remoteMainsailUrl != null
         val configPresent = File(filesDir, "printer_data/config/printer.cfg").exists()
         val klippyReady = KlipperHostService.isKlippyReady(this)
 
@@ -369,6 +416,17 @@ class MainActivity : Activity() {
             }
         }
         updateSetupGuide()
+    }
+
+    private fun copyMainsailAddress() {
+        val url = DeviceIdentity.mainsailLanUrl()
+        if (url == null) {
+            Toast.makeText(this, "No LAN address detected", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("AndroidKlipper Mainsail", url))
+        Toast.makeText(this, "Mainsail address copied", Toast.LENGTH_SHORT).show()
     }
 
     private fun copyReport() {
