@@ -22,6 +22,24 @@ The current development build runs the real stack on Android:
 
 The USB transport deliberately lives at the Android edge. Klipper itself should stay as close to upstream as possible.
 
+## Android device power requirement
+
+AndroidKlipper requires normal USB host/OTG support to talk to the printer.
+
+For long prints where the Android device must stay powered indefinitely, the device must also support **charging while remaining in USB host mode** through the chosen hub/adapter. USB-C or OTG support by itself does **not** guarantee this behavior.
+
+A device that cannot charge while hosting USB can still run AndroidKlipper from its battery, but it should not be treated as suitable for unattended or long-duration printing unless the battery runtime is sufficient for the job.
+
+Tested so far:
+
+| Device | Printer USB works | Charges while hosting printer USB | Notes |
+| --- | --- | --- | --- |
+| Retroid Pocket G2 | Yes | **Yes** | Current best-tested AndroidKlipper host |
+| Fire HD 8 (KFRAPWI) | Yes | **No with tested hubs/cables** | Can print on battery; charging + USB host was not reliable |
+| Moto G Play 2024 (XT2413V) | Yes | **No with tested OTG/powered-hub setups** | USB host works without external power; adding power caused charging/data-role problems |
+
+See `docs/COMPATIBILITY.md` for details. Power behavior is device-specific and should be verified before relying on a new Android device for long prints.
+
 ## Current hardware checkpoint - 2026-09-26
 
 Primary test device: Retroid Pocket G2, Android 15.

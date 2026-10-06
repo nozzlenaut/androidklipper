@@ -30,6 +30,10 @@ The main device-to-device wildcards are outside Klipper:
 - vendor power-management rules
 - USB permission behavior
 
+For indefinite or long-duration printing, **simultaneous charging + USB host mode is a hardware requirement**. Plain USB-C, OTG, or USB host support does not prove that a device can remain a host while accepting external power.
+
+A device that fails this requirement may still be useful for battery-powered prints, but AndroidKlipper should clearly present it as limited rather than implying a powered hub will necessarily solve it.
+
 So the software architecture is reasonably portable; Android hardware/power policy is the bigger risk.
 
 ### Different printer
@@ -50,23 +54,36 @@ The intended replacement is a saved printer profile containing the expected MCU 
 - successful run had zero print stalls and zero invalid MCU bytes
 - isolated retransmit bursts still occur and remain under investigation
 - persistent host lifecycle guard + wake lock stayed intact through the successful print
+- **tested successfully charging while simultaneously hosting the printer over USB**
 - physical screen-off/power-policy behavior still deserves dedicated soak testing; do not generalize one successful run into universal Android behavior
 
-### Fire HD 8
+### Fire HD 8 (KFRAPWI)
 
-Earlier builds proved local Mainsail, MCU communication, XY homing, fans/heaters/LED control, and periods of stable operation. It also showed bulk-write failures, charging/OTG headaches, and aggressive platform power behavior.
+Earlier builds proved local Mainsail, MCU communication, XY homing, fans/heaters/LED control, and periods of stable operation.
 
-The current transport and wake fixes should be retested on the Fire rather than assuming old failures still apply.
+With the hubs/cables tested so far, the tablet does **not** reliably charge while remaining in USB host mode. It can still be useful as a battery-powered AndroidKlipper host, but should not be presented as suitable for indefinite powered printing unless a future hardware combination proves otherwise.
 
-### Cheap mainstream phones
+### Moto G Play 2024 (XT2413V)
 
-A Moto G-class prepaid phone is a useful next test because it is closer to the project's actual value proposition than a specialty handheld: cheap, common Android hardware replacing a Pi-sized host.
+USB host mode works when the phone is connected through OTG without external charging power.
 
-USB host support and powered-hub behavior must still be verified per model.
+With the powered OTG/hub combinations tested so far, adding external power either failed to charge the phone or made USB data intermittent. It therefore does **not** currently meet the simultaneous charging + printer-host requirement.
+
+This is a useful example of why generic "USB-C + OTG support" is not enough to claim AndroidKlipper power compatibility.
 
 ## Charging while hosting USB
 
-OTG + charging behavior is device and adapter dependent. This remains one of the strongest cases for an optional tested hardware kit.
+OTG + charging behavior is device and adapter dependent. For long-running installs, simultaneous charging + USB host is a device-level compatibility requirement rather than something AndroidKlipper can guarantee in software.
+
+Current tested status:
+
+| Device | USB printer host | Charges while hosting | Current classification |
+| --- | --- | --- | --- |
+| Retroid Pocket G2 | Yes | **Yes** | Recommended test host |
+| Fire HD 8 (KFRAPWI) | Yes | **No with tested hardware** | Battery-powered use only |
+| Moto G Play 2024 (XT2413V) | Yes | **No with tested hardware** | Battery-powered use only |
+
+A powered hub is not automatically a fix. The Android device must support accepting charge while keeping its USB controller in host mode.
 
 Long-term software should expose:
 
