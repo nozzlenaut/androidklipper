@@ -777,6 +777,13 @@ int main(void) {
         }
     }
 
+    // Klipper's MCU transport is latency-sensitive. The SDK's default
+    // performance power-management mode can still sleep between beacons,
+    // producing occasional 100+ ms stalls. Keep the CYW43 fully awake while
+    // this device is acting as a printer transport.
+    const int wifi_pm_rc = cyw43_wifi_pm(&cyw43_state, CYW43_NONE_PM);
+    printf("Wi-Fi power save: disabled rc=%d\n", wifi_pm_rc);
+
     cyw43_arch_lwip_begin();
     const bool network_ok = start_network_services();
     cyw43_arch_lwip_end();

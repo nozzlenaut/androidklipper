@@ -132,9 +132,10 @@ assert "toString().also" in host_service
 assert "sessions.forEach { runCatching { it.close() } }" in host_service
 assert "Thread.sleep(USB_REOPEN_SETTLE_MS)" in host_service
 assert "PowerManager.PARTIAL_WAKE_LOCK" in host_service
-assert "acquireHostWakeLock()" in host_service
-assert "releaseHostWakeLock()" in host_service
-assert "if (!realConfig) releaseHostWakeLock()" in host_service
+assert "WifiManager.WIFI_MODE_FULL_LOW_LATENCY" in host_service
+assert "acquireHostRuntimeLocks()" in host_service
+assert "releaseHostRuntimeLocks()" in host_service
+assert "if (!realConfig) releaseHostRuntimeLocks()" in host_service
 
 hostprobe = (root / "app/src/main/python/hostprobe.py").read_text()
 assert "def probe_pipe_open(path):" in hostprobe

@@ -12,6 +12,7 @@ import android.os.Environment
 import android.system.Os
 import android.os.IBinder
 import android.os.PowerManager
+import android.net.wifi.WifiManager
 import android.os.SystemClock
 import android.os.Process
 import com.chaquo.python.Python
@@ -64,6 +65,7 @@ class KlipperHostService : Service() {
     private val statusServer = LocalStatusServer { HostStatusStore.load(this) }
     private val mainsailServer by lazy { MainsailServer(this) }
     private var hostWakeLock: PowerManager.WakeLock? = null
+    private var hostWifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -96,7 +98,7 @@ class KlipperHostService : Service() {
             else -> "Starting USB host test…"
         }
         startForeground(NOTIFICATION_ID, notification(startText))
-        if (realConfig) acquireHostWakeLock()
+        if (realConfig) acquireHostRuntimeLocks()
 
         // A second USB attach/permission callback must never tear down a live print.
         // v249 rebuilt the whole host on every service start, and rebuildSessions()
@@ -143,7 +145,7 @@ class KlipperHostService : Service() {
         sessions.forEach { runCatching { it.close() } }
         sessions.clear()
         if (hadSessions) Thread.sleep(USB_REOPEN_SETTLE_MS)
-        if (!realConfig) releaseHostWakeLock()
+        if (!realConfig) releaseHostRuntimeLocks()
 
         val storageSummary = prepareGcodeStorage()
 
@@ -333,7 +335,7 @@ class KlipperHostService : Service() {
         if (realConfig) {
             if (!allIdentified || stablePtyMap.size != expectedMcuCount) {
                 persistentHostActive.set(false)
-                releaseHostWakeLock()
+                releaseHostRuntimeLocks()
                 HostDiagnostics.log(this, "persistent host skipped: MCU identify incomplete")
                 statusLines += "Persistent host SKIPPED: every supported USB device must identify as a Klipper MCU first."
             } else {
@@ -391,7 +393,7 @@ class KlipperHostService : Service() {
 
                 if (!klippySocketReady) {
                     persistentHostActive.set(false)
-                    releaseHostWakeLock()
+                    releaseHostRuntimeLocks()
                     HostDiagnostics.log(this, "persistent host failed: Klippy API socket did not appear")
                     statusLines += "Persistent Klippy ERROR: API socket did not appear."
                 } else {
@@ -712,6 +714,49 @@ class KlipperHostService : Service() {
         return "$manufacturer $model"
     }
 
+    private fun acquireHostRuntimeLocks() {
+        acquireHostWakeLock()
+        acquireLowLatencyWifiLock()
+    }
+
+    private fun releaseHostRuntimeLocks() {
+        releaseLowLatencyWifiLock()
+        releaseHostWakeLock()
+    }
+
+    private fun acquireLowLatencyWifiLock() {
+        if (hostWifiLock?.isHeld == true) return
+        val wifiManager =
+            applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        hostWifiLock = wifiManager.createWifiLock(
+            mode,
+            "$packageName:KlipperWifi"
+        ).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+        HostDiagnostics.log(
+            this,
+            "wifi lock acquired lowLatency=${Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q} " +
+                "held=${hostWifiLock?.isHeld == true}"
+        )
+    }
+
+    private fun releaseLowLatencyWifiLock() {
+        val wasHeld = hostWifiLock?.isHeld == true
+        hostWifiLock?.let { lock ->
+            if (lock.isHeld) runCatching { lock.release() }
+        }
+        hostWifiLock = null
+        if (wasHeld) HostDiagnostics.log(this, "wifi lock released")
+    }
+
     private fun acquireHostWakeLock() {
         if (hostWakeLock?.isHeld == true) return
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -797,7 +842,7 @@ class KlipperHostService : Service() {
         klippyExecutor.shutdownNow()
         statusServer.close()
         runCatching { mainsailServer.stop() }
-        releaseHostWakeLock()
+        releaseHostRuntimeLocks()
         HostDiagnostics.log(this, "service onDestroy end")
         super.onDestroy()
     }
