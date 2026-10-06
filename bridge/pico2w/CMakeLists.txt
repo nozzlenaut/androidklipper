@@ -36,7 +36,7 @@ target_include_directories(androidklipper_bridge PRIVATE
 target_link_libraries(androidklipper_bridge
   pico_stdlib
   pico_unique_id
-  pico_cyw43_arch_lwip_threadsafe_background
+  pico_cyw43_arch_lwip_poll
   tinyusb_host
   tinyusb_board
 )

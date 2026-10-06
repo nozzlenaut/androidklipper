@@ -13,4 +13,4 @@
 #define AK_KLIPPER_VID 0x1d50
 #define AK_KLIPPER_PID 0x614e
 
-#define AK_FIRMWARE_VERSION "0.2.1-low-latency"
+#define AK_FIRMWARE_VERSION "0.2.2-polled-io"
