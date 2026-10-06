@@ -4,11 +4,11 @@ AndroidKlipper turns an ordinary Android device into a real Klipper host. It run
 
 The core project is intentionally small: use cheap Android hardware in place of the Raspberry Pi-shaped part of a Klipper setup without forking Klipper into a proprietary appliance.
 
-## Stable core checkpoint
+## Release baseline
 
-The current release baseline is `generic-onboarding-stable-2026-10-03`.
+The clean-device onboarding foundation is `generic-onboarding-stable-2026-10-03`. Current `main` builds on that checkpoint with the v1 UI cleanup, remote Mainsail address display/copy, charging compatibility guidance, and Android battery telemetry without changing the proven USB/Klipper timing path.
 
-That checkpoint was tested from a clean Android install through:
+The generic onboarding checkpoint was tested from a clean Android install through:
 
 `install → connect printer USB → grant permissions → identify MCUs → start Moonraker → open Mainsail → upload config → wait for includes → start Klippy → READY → print`
 
