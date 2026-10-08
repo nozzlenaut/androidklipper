@@ -1,1 +1,0 @@
-var e=`Catalan`,t={title:e};export{t as default,e as title};

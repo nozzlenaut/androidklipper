@@ -13,3 +13,11 @@ __pycache__/
 test-artifacts/
 
 vendor/mainsail/
+
+vendor/moonraker/
+app/src/main/python/moonraker/
+
+# Rebuilt from pinned Mainsail source by vendor-mainsail.sh and CI.
+app/src/main/assets/mainsail/
+app/src/main/python/extras/
+app/src/main/python/kinematics/

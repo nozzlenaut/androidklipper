@@ -12,6 +12,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -31,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var mainsailLanAddress: TextView
     private lateinit var copyMainsailAddressButton: Button
     private lateinit var autoStartButton: Button
+    private lateinit var batteryOptimizationButton: Button
     private lateinit var advancedControls: LinearLayout
     private val usbManager by lazy { getSystemService(Context.USB_SERVICE) as UsbManager }
     private val automationPrefs by lazy {
@@ -57,6 +60,27 @@ class MainActivity : Activity() {
                 report.startsWith("USB bridge error"))
         ) {
             clearAutoStartState()
+        }
+    }
+
+    // SharedPreferences are not coherent across Android processes. Send the
+    // current setting explicitly whenever the isolated kiosk is launched.
+    private fun openMainsail() {
+        startActivity(Intent(this, MainsailActivity::class.java).putExtra(
+            KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE,
+            automationPrefs.getBoolean(KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, true)
+        ))
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::batteryOptimizationButton.isInitialized) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            batteryOptimizationButton.text = if (powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                "Battery optimization: EXEMPT"
+            } else {
+                "Battery optimization: CHECK SETTINGS"
+            }
         }
     }
 
@@ -127,7 +151,7 @@ class MainActivity : Activity() {
             text = "Open Mainsail"
             isEnabled = false
             setOnClickListener {
-                startActivity(Intent(this@MainActivity, MainsailActivity::class.java))
+                openMainsail()
             }
         }
         mainsailLanAddress = TextView(this).apply {
@@ -198,6 +222,50 @@ class MainActivity : Activity() {
             }
         }
         updateAutoStartButton()
+        val keepMainsailAwake = Button(this).apply {
+            fun refreshLabel() {
+                text = "Keep Mainsail display awake: " +
+                    if (automationPrefs.getBoolean(
+                            KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, true
+                        )
+                    ) "ON" else "OFF"
+            }
+            refreshLabel()
+            setOnClickListener {
+                val enabled = !automationPrefs.getBoolean(
+                    KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, true
+                )
+                automationPrefs.edit()
+                    .putBoolean(KlipperHostService.KEY_KEEP_MAINSAIL_SCREEN_AWAKE, enabled)
+                    .apply()
+                refreshLabel()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (enabled) {
+                        "Mainsail will keep the display awake"
+                    } else {
+                        "Mainsail will allow normal screen timeout"
+                    },
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        batteryOptimizationButton = Button(this).apply {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val exempt = powerManager.isIgnoringBatteryOptimizations(packageName)
+            text = if (exempt) {
+                "Battery optimization: EXEMPT"
+            } else {
+                "Battery optimization: CHECK SETTINGS"
+            }
+            setOnClickListener {
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }.onFailure {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            }
+        }
         val copy = Button(this).apply {
             text = "Copy diagnostic report"
             setOnClickListener { copyReport() }
@@ -214,6 +282,8 @@ class MainActivity : Activity() {
         advancedControls.addView(scan)
         advancedControls.addView(realConfig)
         advancedControls.addView(autoStartButton)
+        advancedControls.addView(keepMainsailAwake)
+        advancedControls.addView(batteryOptimizationButton)
         advancedControls.addView(copy)
         advancedControls.addView(test)
         advancedControls.addView(smoke)
@@ -397,7 +467,7 @@ class MainActivity : Activity() {
             )
         ) return
         clearAutoStartState()
-        startActivity(Intent(this, MainsailActivity::class.java))
+        openMainsail()
     }
 
     private fun scanUsb() {
