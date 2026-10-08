@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
@@ -16,6 +17,7 @@
         <activity
             android:name=".MainsailActivity"
             android:exported="false"
+            android:process=":mainsail"
             android:screenOrientation="landscape" />
         <activity
             android:name=".MainActivity"

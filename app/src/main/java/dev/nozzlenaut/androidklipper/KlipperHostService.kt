@@ -706,21 +706,12 @@ class KlipperHostService : Service() {
             "service onTaskRemoved protectHost=$protectHost sessions=${sessions.size}"
         )
         if (protectHost) {
-            // Removing the UI task must not demote or rebuild a live printer host.
-            // Refresh the foreground-service state and wake lock in place; keep the
-            // existing Klippy process, PTYs, and USB sessions completely untouched.
+            // The service is already foreground. Re-promoting it here makes Android
+            // re-check connectedDevice foreground-service prerequisites while the
+            // activity task is disappearing. Keep the existing foreground service,
+            // Klippy process, PTYs, USB sessions, and CPU wake lock untouched.
             acquireHostWakeLock()
-            runCatching {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification("Klipper host running")
-                )
-            }.onFailure {
-                HostDiagnostics.log(
-                    this,
-                    "onTaskRemoved foreground refresh failed: ${it.javaClass.simpleName}: ${it.message}"
-                )
-            }
+            HostDiagnostics.log(this, "onTaskRemoved: foreground host left running in place")
         }
         super.onTaskRemoved(rootIntent)
     }
@@ -767,6 +758,7 @@ class KlipperHostService : Service() {
         const val KEY_AUTO_START_USB = "auto_start_usb"
         const val KEY_AUTO_START_IN_PROGRESS = "auto_start_in_progress"
         const val KEY_AUTO_KIOSK_PENDING = "auto_kiosk_pending"
+        const val KEY_KEEP_MAINSAIL_SCREEN_AWAKE = "keep_mainsail_screen_awake"
         private const val PREF_SERVICE_STATE = "service_state"
         private const val KEY_DESIRED_REAL_HOST = "desired_real_host"
         private const val KEY_MOONRAKER_READY = "moonraker_ready"

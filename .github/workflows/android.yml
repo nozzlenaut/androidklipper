@@ -2,7 +2,7 @@ name: Android build
 
 on:
   push:
-    branches: [main]
+    branches: [main, hardening-v1-2026-10-08]
     tags: ['androidklipper-*']
   pull_request:
   workflow_dispatch:
@@ -67,6 +67,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -121,6 +125,16 @@ jobs:
       - name: Vendor pinned Moonraker
         run: bash scripts/vendor-moonraker.sh
 
+      - name: Build pinned Mainsail with Android battery telemetry
+        run: bash scripts/vendor-mainsail.sh
+
+      - name: Battery and metadata regression tests
+        run: |
+          python3 -m pip install Pillow==11.0.0
+          python3 -m unittest discover -s scripts/tests -v
+          node scripts/tests/battery.test.cjs
+          node vendor/mainsail/node_modules/typescript/bin/tsc --noEmit --strict --target ES2020 --lib ES2020,DOM scripts/mainsail-battery.ts
+
       - name: Static project checks
         run: python3 scripts/check-project.py
 
@@ -167,4 +181,23 @@ jobs:
           gh release create "$GITHUB_REF_NAME" "$out" \
             --prerelease \
             --title "AndroidKlipper ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.txt
+
+      # Keep the known-good main and prior release intact until device acceptance.
+      - name: Publish hardening candidate APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/hardening-v1-2026-10-08'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="androidklipper-hardening-20261008-ci${GITHUB_RUN_NUMBER}"
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          out="AndroidKlipper-${tag}.apk"
+          cp "$apk" "$out"
+          cp docs/HARDENING_2026-10-08.md release-notes.txt
+          echo "" >> release-notes.txt
+          echo "Commit: ${GITHUB_SHA}" >> release-notes.txt
+          sha256sum "$out" >> release-notes.txt
+          gh release create "$tag" "$out" --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "AndroidKlipper hardening candidate (CI ${GITHUB_RUN_NUMBER})" \
             --notes-file release-notes.txt

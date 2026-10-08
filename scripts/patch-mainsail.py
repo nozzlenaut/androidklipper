@@ -75,17 +75,7 @@ replace_once(actions_path, actions_series_old, actions_series_new, "battery char
 actions_fetch_old = """            commit('addToSource', {
                 data: data,
 """
-actions_fetch_new = """            try {
-                const response = await fetch('/androidklipper/battery', { cache: 'no-store' })
-                if (response.ok) {
-                    const battery = (await response.json()) as { level?: number }
-                    if (typeof battery.level === 'number' && Number.isFinite(battery.level)) {
-                        data['androidklipper-battery'] = Math.max(0, Math.min(1, battery.level / 100))
-                    }
-                }
-            } catch {
-                // Android battery telemetry is optional; never disturb normal Mainsail updates.
-            }
+actions_fetch_new = """            data['androidklipper-battery'] = sampleAndroidBattery()
 
             commit('addToSource', {
                 data: data,
@@ -100,3 +90,15 @@ getters_new = """                return (
                 )
 """
 replace_once(getters_path, getters_old, getters_new, "percent-axis visibility")
+# Build from readable source, not hand-edited generated JavaScript.
+helper = Path(__file__).with_name("mainsail-battery.ts")
+actions_path.with_name("androidBattery.ts").write_text(helper.read_text())
+replace_once(actions_path, "export const actions:",
+             "import { createBatterySampler } from './androidBattery'\n"
+             "const sampleAndroidBattery = createBatterySampler()\n\nexport const actions:",
+             "battery sampler")
+replace_once(actions_path, "        if (items.length) {",
+             "        if (state.series.length) {", "battery without temperature sensors")
+replace_once(actions_path, "            commit('setInitSeries', series)",
+             "            commit('setInitSeries', series)\n"
+             "            dispatch('updateSource')", "initial battery poll")

@@ -70,13 +70,13 @@ The build instead compiles Klipper's helper with the Android NDK and packages it
 
 The original printer config should stay original.
 
-AndroidKlipper imports the config into its own runtime area and rewrites only the pieces required for the Android host, mainly MCU transport paths and Android-incompatible host settings. The source config is not destructively edited.
+AndroidKlipper uses the persistent config uploaded through Mainsail. A connection-time serial map resolves normal USB identities to current PTYs; it does not rewrite the user config. Klipper SAVE_CONFIG writes to the persistent config.
 
 ## Klipper, Moonraker, and Mainsail
 
 The project has moved past the original USB-only milestone. Current development builds can start persistent Klippy, expose its normal API socket, start Moonraker locally, and serve a bundled Mainsail interface from the Android device.
 
-That does **not** mean the printer-host stack is production-ready. USB stability and reliable full homing are still active problems on the Fire HD 8 test machine.
+The recorded baseline includes sustained G2 printing and clean Moto onboarding through READY and homing. Coverage is device-specific; the October 8 hardening candidate still requires fresh device acceptance. The kiosk WebView runs in a separate process in that candidate so browser process failures have a smaller impact on the host.
 
 The important design rule is that Moonraker and Mainsail sit above the USB/PTY transport. Fixing the UI or web API should not require redesigning the physical MCU bridge.
 

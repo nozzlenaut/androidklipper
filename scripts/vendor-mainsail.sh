@@ -17,13 +17,13 @@ git -C "$VENDOR" checkout "$MAINSAIL_COMMIT"
   "$VENDOR/src/store/printer/tempHistory/getters.ts"
 
 pushd "$VENDOR" >/dev/null
-npm ci --no-audit --no-fund
+CYPRESS_INSTALL_BINARY=0 npm ci --no-audit --no-fund
 npx vite build
 popd >/dev/null
 
 rm -rf "$ASSETS"
 mkdir -p "$ASSETS"
 cp -a "$VENDOR/dist/." "$ASSETS/"
-printf '%s' 'v2.19.0-androidklipper-battery1' > "$ASSETS/.version"
+printf '%s' 'v2.19.0-androidklipper-battery2' > "$ASSETS/.version"
 
 echo "Vendored Mainsail v2.19.0 with Android battery telemetry"

@@ -30,6 +30,15 @@ This roadmap separates the finished v1 host core from optional follow-on work.
 
 Frozen clean-device baseline: `generic-onboarding-stable-2026-10-03`.
 
+## October 8 hardening candidate
+
+- [x] bring lifecycle isolation and foreground-service fixes forward from PR #8
+- [x] pass kiosk wake setting explicitly across the process boundary
+- [x] non-blocking, bounded battery polling with stale-reading expiry
+- [x] automated pinned-parser layer/time/thumbnail and recovery tests
+- [ ] device acceptance on the candidate APK (see HARDENING_2026-10-08.md)
+- [ ] promote candidate to stable only after device evidence is recorded
+
 ## Core reliability follow-ups
 
 These are worthwhile hardening items, but they do not block the v1 host concept:

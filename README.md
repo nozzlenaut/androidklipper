@@ -4,6 +4,22 @@ AndroidKlipper turns an ordinary Android device into a real Klipper host. It run
 
 The core project is intentionally small: use cheap Android hardware in place of the Raspberry Pi-shaped part of a Klipper setup without forking Klipper into a proprietary appliance.
 
+## Hardening candidate — October 8, 2026
+
+The `hardening-v1-2026-10-08` branch contains lifecycle and battery hardening plus
+metadata regression tests. Its APK is a **prerelease candidate**, not a new
+hardware-proven baseline. See [the checkpoint and acceptance checklist](docs/HARDENING_2026-10-08.md).
+The previous main (`15f180c`) and the generic onboarding tag remain rollback points.
+
+## Building
+
+Run `scripts/vendor-klipper.sh`, `scripts/vendor-moonraker.sh`, and
+`scripts/vendor-mainsail.sh` before the project checks or Android build. Mainsail
+is built from its pinned source with the readable Android patches; generated web
+assets are build output and are no longer maintained as a second source of truth.
+CI runs the battery/metadata regression tests, project checks, Android unit tests,
+APK build, and package inspection. Android hardware testing is a separate gate.
+
 ## Release baseline
 
 The clean-device onboarding foundation is `generic-onboarding-stable-2026-10-03`. Current `main` builds on that checkpoint with the v1 UI cleanup, remote Mainsail address display/copy, charging compatibility guidance, and Android battery telemetry without changing the proven USB/Klipper timing path.
