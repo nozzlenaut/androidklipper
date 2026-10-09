@@ -43,21 +43,19 @@ class MainActivity : Activity() {
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent?.getStringExtra(KlipperHostService.EXTRA_STATUS)?.let {
-                handleStatusReport(it)
+                handleStatusReport(it, HostReportSource.LIVE)
             }
         }
     }
 
-    private fun handleStatusReport(report: String) {
+    private fun handleStatusReport(report: String, source: HostReportSource) {
         status.text = report
         updateSetupGuide()
         maybeOpenAutoKiosk()
         if (automationPrefs.getBoolean(
                 KlipperHostService.KEY_AUTO_KIOSK_PENDING, false
             ) &&
-            (report.contains("Host startup ERROR") ||
-                report.contains("Moonraker ERROR") ||
-                report.startsWith("USB bridge error"))
+            HostReportPolicy.canCancelAutoStart(report, source)
         ) {
             clearAutoStartState()
         }
@@ -337,10 +335,10 @@ class MainActivity : Activity() {
 
         // A system USB permission dialog (or a brief app switch) can hide this
         // activity while the service reaches Moonraker READY. Replaying the
-        // stored report through the same state handler makes that transition
-        // deterministic even if its live broadcast was missed.
+        // stored report still updates the UI and opens a ready kiosk. However,
+        // an old failure must not cancel the fresh USB startup armed in onCreate.
         HostStatusStore.load(this)?.let {
-            handleStatusReport(it)
+            handleStatusReport(it, HostReportSource.SAVED)
         } ?: updateSetupGuide()
     }
 
