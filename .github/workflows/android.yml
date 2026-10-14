@@ -83,18 +83,44 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      # Keep the generated debug signing key stable across CI runs. This is a
-      # development-only key, but caching it lets later APKs update in place
-      # instead of forcing an uninstall/reinstall every build.
-      - name: Restore debug signing key
+      # Debug signing key policy
+      #
+      # Android refuses an in-place update when the signing key changes, and
+      # the only fix is uninstalling, which also deletes AndroidKlipperDrive
+      # (config, Moonraker database, G-code). So the key must never be silently
+      # regenerated.
+      #
+      # Preferred: store the keystore base64-encoded in the repo secret
+      #   ANDROIDKLIPPER_DEBUG_KEYSTORE_B64
+      # Fallback: the Actions cache (GitHub evicts caches unused for ~7 days).
+      # Optional guard: set the repo variable ANDROIDKLIPPER_DEBUG_KEY_SHA256 to
+      # the expected certificate fingerprint; the build then fails loudly
+      # instead of shipping an APK signed by a different key.
+      # See docs/SIGNING.md.
+      - name: Install debug signing key from secret
+        id: debug-signing-secret
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.ANDROIDKLIPPER_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "${DEBUG_KEYSTORE_B64:-}" ]; then
+            mkdir -p ~/.android
+            printf '%s' "$DEBUG_KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+            echo "installed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANDROIDKLIPPER_DEBUG_KEYSTORE_B64 is not set; falling back to the Actions cache for the debug key. If the cache is evicted, APKs stop updating in place. See docs/SIGNING.md."
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore debug signing key (cache fallback)
         id: debug-signing-cache
+        if: steps.debug-signing-secret.outputs.installed != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: androidklipper-debug-keystore-v1
 
-      - name: Create debug signing key on first run
-        if: steps.debug-signing-cache.outputs.cache-hit != 'true'
+      - name: Create debug signing key on first run (cache fallback)
+        if: steps.debug-signing-secret.outputs.installed != 'true' && steps.debug-signing-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.android
           keytool -genkeypair \
@@ -108,12 +134,25 @@ jobs:
             -validity 10000
 
       - name: Verify debug signing key
+        env:
+          EXPECTED_SHA256: ${{ vars.ANDROIDKLIPPER_DEBUG_KEY_SHA256 }}
         run: |
           keytool -list -v \
             -keystore ~/.android/debug.keystore \
             -storepass android \
-            -alias androiddebugkey \
-            | grep -E 'Owner:|SHA256:'
+            -alias androiddebugkey > /tmp/keyinfo.txt
+          grep -E 'Owner:|SHA256:' /tmp/keyinfo.txt
+          if [ -n "${EXPECTED_SHA256:-}" ]; then
+            actual="$(grep -m1 'SHA256:' /tmp/keyinfo.txt | sed 's/.*SHA256:[[:space:]]*//' | tr -d ':[:space:]' | tr 'a-f' 'A-F')"
+            expected="$(printf '%s' "$EXPECTED_SHA256" | tr -d ':[:space:]' | tr 'a-f' 'A-F')"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::Debug signing key fingerprint changed (expected $expected, got $actual). Refusing to build an APK that cannot update existing installs in place."
+              exit 1
+            fi
+            echo "Debug signing key matches pinned fingerprint."
+          else
+            echo "::notice::ANDROIDKLIPPER_DEBUG_KEY_SHA256 is not set; key identity is not being pinned."
+          fi
 
       - name: Vendor pinned Klipper
         run: bash scripts/vendor-klipper.sh
