@@ -79,18 +79,24 @@ assert "MAX_CONSECUTIVE_WRITE_FAILURES" not in usb_session
 assert "MAX_WRITE_RETRY_WINDOW_MS" in usb_session
 assert "writeRetryCount" in usb_session
 assert "failSession(" in usb_session
-assert "thread.join(IO_THREAD_JOIN_TIMEOUT_MS)" in usb_session
+assert "joinIoThreads(" in usb_session and "IO_THREAD_JOIN_TIMEOUT_MS" in usb_session
+# close(): threads must be gone before the PTY fd is closed (fd-reuse race).
+assert usb_session.index("var stopped = joinIoThreads(") < usb_session.index("runCatching { pty.close() }")
+assert "ptyFdLeaked" in usb_session
 assert "Thread.sleep(5)" not in usb_session
 assert "THREAD_PRIORITY_URGENT_AUDIO" not in usb_session
 assert "THREAD_PRIORITY_FOREGROUND" in usb_session
 assert "statsSnapshot" in usb_session
 assert "buffer.copyOf(n)" not in usb_session
-assert "pty.write(buffer, n)" in usb_session
+assert "PtyWriter.writeAll(" in usb_session
+assert "pty.write(buffer, remaining, offset)" in usb_session
+# USB->PTY must never use an unbounded/unchecked write again.
+assert "PTY write incomplete" not in usb_session
 
 pty_kotlin = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/pty/PtyBridge.kt").read_text()
-assert "fun write(data: ByteArray, length: Int = data.size)" in pty_kotlin
-assert "nativeWrite(masterFd, data, length)" in pty_kotlin
-assert "nativeWrite(fd: Int, data: ByteArray, length: Int)" in pty_kotlin
+assert "fun write(" in pty_kotlin and "timeoutMs: Int = DEFAULT_WRITE_TIMEOUT_MS" in pty_kotlin
+assert "nativeWrite(masterFd, data, offset, length, timeoutMs)" in pty_kotlin
+assert "fd: Int, data: ByteArray, offset: Int, length: Int, timeoutMs: Int" in pty_kotlin
 
 klipper_patch = (root / "scripts/patch-klipper.py").read_text()
 assert 'trsync_needle = "TRSYNC_TIMEOUT = 0.025"' in klipper_patch
@@ -103,8 +109,12 @@ assert "cfmakeraw" in pty_bridge
 assert "tcsetattr" in pty_bridge
 assert "POLLHUP" in pty_bridge
 assert "errno == EIO" in pty_bridge
-assert "jint requested_len" in pty_bridge
-assert "requested_len > array_len" in pty_bridge
+assert "jint timeout_ms" in pty_bridge
+assert "length > array_len - offset" in pty_bridge
+# The master fd must stay non-blocking and writes must be poll()-bounded.
+assert "O_NONBLOCK" in pty_bridge
+assert "POLLOUT" in pty_bridge
+assert "GetByteArrayElements(data" not in pty_bridge
 
 permission_receiver = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbPermissionReceiver.kt").read_text()
 assert "KlipperHostService.EXTRA_FULL_SMOKE" in permission_receiver

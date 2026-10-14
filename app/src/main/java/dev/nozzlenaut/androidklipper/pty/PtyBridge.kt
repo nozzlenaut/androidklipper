@@ -22,9 +22,21 @@ class PtyBridge private constructor(
     // Bytes from the real USB MCU are written here so Klipper can read them.
     // Accept a used length so the USB hot path can reuse its receive buffer
     // instead of allocating/copying a new ByteArray for every packet.
-    fun write(data: ByteArray, length: Int = data.size): Int {
-        require(length in 0..data.size) { "Invalid PTY write length $length for ${data.size}-byte buffer" }
-        return nativeWrite(masterFd, data, length)
+    //
+    // Never blocks longer than timeoutMs. Returns the bytes written, which can
+    // be fewer than requested (0 when Klippy is not draining the PTY); a
+    // negative value means the PTY fd is unusable. Use PtyWriter.writeAll() to
+    // turn this into "write everything or fail after a stall".
+    fun write(
+        data: ByteArray,
+        length: Int = data.size,
+        offset: Int = 0,
+        timeoutMs: Int = DEFAULT_WRITE_TIMEOUT_MS
+    ): Int {
+        require(offset >= 0 && length >= 0 && offset + length <= data.size) {
+            "Invalid PTY write range offset=$offset length=$length for ${data.size}-byte buffer"
+        }
+        return nativeWrite(masterFd, data, offset, length, timeoutMs)
     }
 
     override fun close() {
@@ -32,6 +44,10 @@ class PtyBridge private constructor(
     }
 
     companion object {
+        // Short on purpose: each call must return quickly so the bridge threads
+        // can notice a shutdown request (running=false) between attempts.
+        const val DEFAULT_WRITE_TIMEOUT_MS = 100
+
         init { System.loadLibrary("androidklipper_pty") }
 
         /**
@@ -51,7 +67,9 @@ class PtyBridge private constructor(
 
         @JvmStatic private external fun nativeCreate(): String
         @JvmStatic private external fun nativeRead(fd: Int, buffer: ByteArray, timeoutMs: Int): Int
-        @JvmStatic private external fun nativeWrite(fd: Int, data: ByteArray, length: Int): Int
+        @JvmStatic private external fun nativeWrite(
+            fd: Int, data: ByteArray, offset: Int, length: Int, timeoutMs: Int
+        ): Int
         @JvmStatic private external fun nativeClose(fd: Int)
     }
 }

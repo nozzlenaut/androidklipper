@@ -163,6 +163,14 @@ jobs:
       - name: Static project checks
         run: python3 scripts/check-project.py
 
+      - name: Script tests
+        run: |
+          python3 -m pip install pyyaml
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+      - name: Native PTY bridge tests
+        run: bash scripts/native-tests/run.sh
+
       - name: Unit tests and debug APK
         run: gradle --stacktrace :app:testDebugUnitTest :app:assembleDebug
 

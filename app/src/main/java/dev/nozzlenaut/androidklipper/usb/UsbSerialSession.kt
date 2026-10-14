@@ -3,10 +3,12 @@ package dev.nozzlenaut.androidklipper.usb
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.os.Process
+import android.os.SystemClock
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
+import dev.nozzlenaut.androidklipper.pty.PtyWriter
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -30,6 +32,8 @@ class UsbSerialSession(
     private val readRetryCount = AtomicLong(0)
     private val writeRetryCount = AtomicLong(0)
     private val maxWriteTransferUs = AtomicLong(0)
+    private val ptyStallCount = AtomicLong(0)
+    private val ptyFdLeaked = AtomicBoolean(false)
 
     fun start() {
         try {
@@ -96,12 +100,7 @@ class UsbSerialSession(
                     when {
                         n > 0 -> {
                             rxBytes.addAndGet(n.toLong())
-                            val written = pty.write(buffer, n)
-                            if (written != n) {
-                                throw IOException(
-                                    "PTY write incomplete for $stableId: wrote $written of $n bytes"
-                                )
-                            }
+                            writeToPty(buffer, n)
                         }
                         n < 0 -> {
                             // Android reports both an idle timeout and a real USB
@@ -157,6 +156,21 @@ class UsbSerialSession(
                 }
             }
         }, "pty-to-usb-${stableId.takeLast(8)}").also { it.start() }
+    }
+
+    /**
+     * Hands bytes to Klippy through the PTY without ever blocking in JNI.
+     * Waits out short stalls (Klippy GC pause, reactor restart), exits quietly
+     * on shutdown, and fails loudly when the PTY has not drained for seconds.
+     */
+    private fun writeToPty(buffer: ByteArray, length: Int) {
+        PtyWriter.writeAll(
+            length = length,
+            isRunning = { running.get() },
+            nowMs = { SystemClock.elapsedRealtime() },
+            onStall = { ptyStallCount.incrementAndGet() },
+            writeChunk = { offset, remaining -> pty.write(buffer, remaining, offset) }
+        )
     }
 
     private fun writeKlipperBulk(endpoint: UsbEndpoint, source: ByteArray, length: Int) {
@@ -236,17 +250,15 @@ class UsbSerialSession(
     private fun stats(): String =
         "rx=${rxBytes.get()} tx=${txBytes.get()} " +
             "readRetries=${readRetryCount.get()} writeRetries=${writeRetryCount.get()} " +
-            "maxWriteUs=${maxWriteTransferUs.get()}"
+            "ptyStalls=${ptyStallCount.get()} maxWriteUs=${maxWriteTransferUs.get()}" +
+            if (ptyFdLeaked.get()) " ptyFdLeaked=true" else ""
 
     private fun withStats(prefix: String, cause: Throwable): IOException =
         IOException("$prefix for $stableId: ${cause.message}; ${stats()}", cause)
 
     override fun onNewData(data: ByteArray) {
         try {
-            val written = pty.write(data)
-            if (written != data.size) {
-                throw IOException("PTY write incomplete: wrote $written of ${data.size} bytes")
-            }
+            writeToPty(data, data.size)
         } catch (t: Throwable) {
             failSession("PTY write failed", t)
         }
@@ -254,6 +266,16 @@ class UsbSerialSession(
 
     override fun onRunError(e: Exception) {
         failSession("Serial I/O manager failed", e)
+    }
+
+    /**
+     * Ask the bridge threads to stop without waiting for them. Lets the service
+     * stop every session in parallel before the slower, ordered close().
+     */
+    fun requestStop() {
+        running.set(false)
+        usbReader?.interrupt()
+        ptyReader?.interrupt()
     }
 
     override fun close() {
@@ -266,22 +288,42 @@ class UsbSerialSession(
         oldUsbReader?.interrupt()
         oldPtyReader?.interrupt()
 
-        // Closing the port releases both CDC interfaces and closes the underlying
-        // UsbDeviceConnection. Do this before join so a blocked bulkTransfer wakes.
+        // Order matters. Every native call a bridge thread makes is bounded
+        // (USB reads 250 ms, PTY poll/write 100 ms), so first let the threads
+        // leave their loops on their own. Closing the PTY fd while another
+        // thread is still inside read()/poll()/write() on it lets Linux reuse
+        // that fd number for something unrelated.
+        var stopped = joinIoThreads(oldUsbReader, oldPtyReader)
+
+        // A thread that is still alive is blocked in bulkTransfer(). Closing the
+        // port releases both CDC interfaces and the UsbDeviceConnection, which
+        // wakes it.
         runCatching { port?.close() }
         port = null
         runCatching { connection.close() }
-        runCatching { pty.close() }
+        if (!stopped) stopped = joinIoThreads(oldUsbReader, oldPtyReader)
 
-        joinIoThread(oldUsbReader)
-        joinIoThread(oldPtyReader)
+        if (stopped) {
+            runCatching { pty.close() }
+        } else {
+            // Leaking one fd is better than closing it under a live thread.
+            ptyFdLeaked.set(true)
+        }
         usbReader = null
         ptyReader = null
     }
 
-    private fun joinIoThread(thread: Thread?) {
-        if (thread == null || thread === Thread.currentThread()) return
-        runCatching { thread.join(IO_THREAD_JOIN_TIMEOUT_MS) }
+    /** True when every given thread has exited (or is the calling thread). */
+    private fun joinIoThreads(vararg threads: Thread?): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + IO_THREAD_JOIN_TIMEOUT_MS
+        var allStopped = true
+        for (thread in threads) {
+            if (thread == null || thread === Thread.currentThread()) continue
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining > 0) runCatching { thread.join(remaining) }
+            if (thread.isAlive) allStopped = false
+        }
+        return allStopped
     }
 
     companion object {
@@ -293,6 +335,6 @@ class UsbSerialSession(
         private const val WRITE_RETRY_BACKOFF_MS = 1L
         private const val MAX_WRITE_RETRY_WINDOW_MS = 250L
         private const val WRITE_ATTEMPT_TIMEOUT_MS = 25
-        private const val IO_THREAD_JOIN_TIMEOUT_MS = 500L
+        private const val IO_THREAD_JOIN_TIMEOUT_MS = 700L
     }
 }
