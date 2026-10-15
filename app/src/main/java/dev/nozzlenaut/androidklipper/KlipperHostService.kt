@@ -20,6 +20,7 @@ import android.provider.Settings
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
+import dev.nozzlenaut.androidklipper.supervision.RestartBackoff
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
 import dev.nozzlenaut.androidklipper.usb.UsbRecoveryPolicy
 import dev.nozzlenaut.androidklipper.usb.UsbStableIds
@@ -32,6 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class KlipperHostService : Service() {
     private val sessions = CopyOnWriteArrayList<UsbSerialSession>()
@@ -60,6 +62,17 @@ class KlipperHostService : Service() {
     private val persistentHostActive = AtomicBoolean(false)
     private val firmwareRestartRecoveryPending = AtomicBoolean(false)
     private val rebuildInProgress = AtomicBoolean(false)
+
+    // Bumped at the start of every rebuild and on destroy. Background workers
+    // (config waiter, Moonraker supervisor) belong to one generation and quietly
+    // stand down when it changes, so a rebuild never races a stale worker.
+    private val hostGeneration = AtomicInteger(0)
+
+    // The first-config waiter can run for hours. It must not occupy hostExecutor,
+    // or a USB re-attach rebuild / firmware-restart recovery would queue behind it.
+    private val configWaitExecutor = Executors.newCachedThreadPool { task ->
+        Thread(task, "androidklipper-config-wait").apply { isDaemon = true }
+    }
     private var usbDetachReceiverRegistered = false
     private val usbDetachReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -274,6 +287,7 @@ class KlipperHostService : Service() {
     }
 
     private fun rebuildSessionsLocked(fullSmoke: Boolean, realConfig: Boolean) {
+        val generation = hostGeneration.incrementAndGet()
         HostDiagnostics.log(
             this,
             "rebuildSessions begin fullSmoke=$fullSmoke realConfig=$realConfig sessions=${sessions.size}"
@@ -437,7 +451,7 @@ class KlipperHostService : Service() {
         if (realConfig) {
             val stableMapping = stablePtyMap.entries.joinToString("|") { (id, path) -> "$id=$path" }
             statusLines += "Klipper MCUs identified: ${stablePtyMap.size}"
-            val moonrakerReady = startMoonraker(statusLines)
+            val moonrakerReady = startMoonraker(statusLines, generation)
 
             val configPath = File(filesDir, "printer_data/config/printer.cfg")
             val missingIncludes =
@@ -452,13 +466,13 @@ class KlipperHostService : Service() {
                 !configPath.exists() -> {
                     statusLines += "Klippy WAITING: printer.cfg is missing. Open Mainsail and upload your normal Klipper config files."
                     if (moonrakerReady) {
-                        waitForFirstPrinterConfig(stableMapping, helper, statusLines.toList())
+                        waitForFirstPrinterConfig(stableMapping, helper, statusLines.toList(), generation)
                     }
                 }
                 missingIncludes != null -> {
                     statusLines += "Klippy WAITING: config upload is incomplete; waiting for $missingIncludes"
                     if (moonrakerReady) {
-                        waitForFirstPrinterConfig(stableMapping, helper, statusLines.toList())
+                        waitForFirstPrinterConfig(stableMapping, helper, statusLines.toList(), generation)
                     }
                 }
                 else -> {
@@ -534,14 +548,16 @@ class KlipperHostService : Service() {
     private fun waitForFirstPrinterConfig(
         stableMapping: String,
         helper: File,
-        baseStatus: List<String>
+        baseStatus: List<String>,
+        generation: Int
     ) {
-        hostExecutor.execute {
+        configWaitExecutor.execute {
             val configPath = File(filesDir, "printer_data/config/printer.cfg")
             val cleanBase = baseStatus.filterNot { it.startsWith("Klippy WAITING:") }
             var lastWaitReason: String? = null
             HostDiagnostics.log(this, "waiting for usable printer.cfg upload")
             while (persistentHostActive.get() &&
+                hostGeneration.get() == generation &&
                 servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)
             ) {
                 if (configPath.exists()) {
@@ -551,6 +567,7 @@ class KlipperHostService : Service() {
                         Thread.sleep(CONFIG_UPLOAD_SETTLE_MS)
                         val after = configTreeFingerprint(configPath.parentFile)
                         val afterMissing = missingConfigIncludes(configPath)
+                        if (hostGeneration.get() != generation) break
                         if (before == after && afterMissing == null) {
                             val lines = cleanBase.toMutableList()
                             lines += "printer.cfg and referenced includes are present: starting Klippy automatically."
@@ -580,19 +597,40 @@ class KlipperHostService : Service() {
                 }
                 Thread.sleep(FIRST_CONFIG_POLL_MS)
             }
-            HostDiagnostics.log(this, "printer.cfg wait ended: host no longer active")
+            HostDiagnostics.log(this, "printer.cfg wait ended: host rebuilt or no longer active")
         }
     }
 
-    private fun startMoonraker(statusLines: MutableList<String>): Boolean {
-        setMoonrakerReady(false)
-        publishStatus(
-            "AndroidKlipper host\n\n" +
-                statusLines.joinToString("\n\n") +
-                "\n\nStarting Moonraker on http://127.0.0.1:7125 …"
-        )
+    private fun waitForMoonrakerPort(attempts: Int = 300): Boolean {
+        for (attempt in 0 until attempts) {
+            try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("127.0.0.1", 7125), 200)
+                }
+                return true
+            } catch (_: Throwable) {
+                Thread.sleep(100)
+            }
+        }
+        return false
+    }
 
-        moonrakerExecutor.execute {
+    /** True while this worker's generation is still the live one and the host is wanted. */
+    private fun moonrakerStillWanted(generation: Int): Boolean =
+        hostGeneration.get() == generation &&
+            persistentHostActive.get() &&
+            servicePrefs.getBoolean(KEY_DESIRED_REAL_HOST, false)
+
+    /**
+     * Runs Moonraker and restarts it (with backoff and a crash-loop cap) if it exits
+     * while the host is still wanted. A stop requested by a rebuild or by shutting
+     * the service down bumps [hostGeneration] first, so those exits are not restarted.
+     * Klippy is a separate worker and keeps running (and printing) throughout.
+     */
+    private fun runMoonrakerSupervised(generation: Int) {
+        val backoff = RestartBackoff()
+        while (true) {
+            val startedAt = SystemClock.elapsedRealtime()
             HostDiagnostics.log(this, "Moonraker worker starting")
             try {
                 val runner = Python.getInstance().getModule("moonraker_runner")
@@ -610,19 +648,68 @@ class KlipperHostService : Service() {
                 )
                 publishStatus("Moonraker ERROR ${t.javaClass.simpleName}: ${t.message}")
             }
-        }
 
-        for (attempt in 0 until 300) {
-            try {
-                Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", 7125), 200)
+            if (!moonrakerStillWanted(generation)) return
+
+            when (val decision = backoff.onUnexpectedExit(startedAt, SystemClock.elapsedRealtime())) {
+                is RestartBackoff.Decision.GiveUp -> {
+                    HostDiagnostics.log(
+                        this,
+                        "Moonraker exited ${decision.restartsInWindow} times in a short window; not restarting"
+                    )
+                    publishStatus(
+                        "Moonraker keeps crashing (${decision.restartsInWindow} restarts in 10 minutes) " +
+                            "and was left stopped. Check printer_data/logs/moonraker.log and " +
+                            "moonraker.conf, then restart the host."
+                    )
+                    return
                 }
-                setMoonrakerReady(true)
-                statusLines += "Moonraker READY: http://127.0.0.1:7125"
-                return true
-            } catch (_: Throwable) {
-                Thread.sleep(100)
+                is RestartBackoff.Decision.Restart -> {
+                    HostDiagnostics.log(
+                        this,
+                        "Moonraker exited unexpectedly; restart #${decision.attempt} in ${decision.delayMs} ms"
+                    )
+                    publishStatus(
+                        "Moonraker exited unexpectedly; restarting in ${decision.delayMs / 1000.0}s " +
+                            "(attempt ${decision.attempt})"
+                    )
+                    // Sleep in short slices so a rebuild that queues a new Moonraker
+                    // behind this worker is not held up by a long backoff.
+                    val wakeAt = SystemClock.elapsedRealtime() + decision.delayMs
+                    try {
+                        while (SystemClock.elapsedRealtime() < wakeAt && moonrakerStillWanted(generation)) {
+                            Thread.sleep(200)
+                        }
+                    } catch (_: InterruptedException) {
+                        return
+                    }
+                    if (!moonrakerStillWanted(generation)) return
+                    // startMoonraker() is not waiting for the port any more: mark ready ourselves.
+                    Thread({
+                        if (waitForMoonrakerPort() && moonrakerStillWanted(generation)) {
+                            setMoonrakerReady(true)
+                            HostDiagnostics.log(this, "Moonraker READY again after restart")
+                        }
+                    }, "androidklipper-moonraker-ready").apply { isDaemon = true }.start()
+                }
             }
+        }
+    }
+
+    private fun startMoonraker(statusLines: MutableList<String>, generation: Int): Boolean {
+        setMoonrakerReady(false)
+        publishStatus(
+            "AndroidKlipper host\n\n" +
+                statusLines.joinToString("\n\n") +
+                "\n\nStarting Moonraker on http://127.0.0.1:7125 …"
+        )
+
+        moonrakerExecutor.execute { runMoonrakerSupervised(generation) }
+
+        if (waitForMoonrakerPort()) {
+            setMoonrakerReady(true)
+            statusLines += "Moonraker READY: http://127.0.0.1:7125"
+            return true
         }
 
         val runnerStatus = runCatching {
@@ -947,6 +1034,7 @@ class KlipperHostService : Service() {
             this,
             "service onDestroy begin persistent=${persistentHostActive.get()} sessions=${sessions.size}"
         )
+        hostGeneration.incrementAndGet()
         persistentHostActive.set(false)
         setMoonrakerReady(false)
         setKlippyReady(false)
@@ -959,6 +1047,7 @@ class KlipperHostService : Service() {
         stopAndCloseSessions()
         watchdogExecutor.shutdownNow()
         hostExecutor.shutdownNow()
+        configWaitExecutor.shutdownNow()
         moonrakerExecutor.shutdownNow()
         klippyExecutor.shutdownNow()
         statusServer.close()

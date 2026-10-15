@@ -174,7 +174,7 @@ assert "THREAD_PRIORITY_URGENT_AUDIO" in host_service
 assert "A successful Klipper identify handshake is the authority" in host_service
 assert '"probe_mcu_identify"' in host_service
 assert "UsbDeviceScanner.isLikelyKlipper(device)" not in host_service
-assert "startMoonraker(statusLines)" in host_service
+assert "startMoonraker(statusLines, generation)" in host_service
 assert "Klippy WAITING: printer.cfg is missing" in host_service
 assert "waitForFirstPrinterConfig" in host_service
 assert "printer.cfg and referenced includes are present: starting Klippy automatically." in host_service
@@ -191,7 +191,7 @@ assert "setMoonrakerReady(true)" in host_service
 assert "setKlippyReady(true)" in host_service
 assert "isMoonrakerReady(context: Context)" in host_service
 assert "isKlippyReady(context: Context)" in host_service
-assert host_service.index("startMoonraker(statusLines)") < host_service.index(
+assert host_service.index("startMoonraker(statusLines, generation)") < host_service.index(
     'val configPath = File(filesDir, "printer_data/config/printer.cfg")'
 )
 assert "KEY_AUTO_START_USB" in host_service
@@ -459,3 +459,13 @@ assert "UsbReadHealth(" in usb_session_src
 assert "fun markDetached()" in usb_session_src
 # A duplicate attach must still be able to resolve to IGNORE (never an unconditional rebuild).
 assert "Decision.IGNORE" in host_service_src
+
+# Worker lifecycle: nothing long-running may sit on hostExecutor, and stale workers stand down.
+assert "configWaitExecutor.execute {" in host_service_src
+waiter_src = host_service_src[host_service_src.index("private fun waitForFirstPrinterConfig("):]
+waiter_src = waiter_src[:waiter_src.index("private fun waitForMoonrakerPort(")]
+assert "hostExecutor.execute" not in waiter_src
+assert "hostGeneration.get() == generation" in waiter_src
+assert "hostGeneration.incrementAndGet()" in host_service_src
+assert "RestartBackoff()" in host_service_src
+assert "runMoonrakerSupervised(generation)" in host_service_src
