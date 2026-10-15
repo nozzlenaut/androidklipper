@@ -596,7 +596,9 @@ class KlipperHostService : Service() {
             HostDiagnostics.log(this, "Moonraker worker starting")
             try {
                 val runner = Python.getInstance().getModule("moonraker_runner")
-                val result = runner.callAttr("run", filesDir.absolutePath).toString()
+                // Android knows the LAN address even when there is no default route
+                // (printer LAN / phone hotspot), which Python's routing trick cannot see.
+                val result = runner.callAttr("run", filesDir.absolutePath, LanAddress.hint()).toString()
                 setMoonrakerReady(false)
                 HostDiagnostics.log(this, "Moonraker worker returned: $result")
                 publishStatus("Moonraker stopped\n\n$result")

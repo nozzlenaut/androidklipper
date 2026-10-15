@@ -302,14 +302,19 @@ assert "trusted_clients:" in moon_runner
 assert "cors_domains:" in moon_runner
 assert "http://my.mainsail.xyz" in moon_runner
 assert "https://my.mainsail.xyz" in moon_runner
-assert 'ipaddress.ip_network(ip + "/24"' in moon_runner
+assert "_MAX_TRUSTED_WIDTH_PREFIX = 24" in moon_runner  # trusted network never wider than /24
+assert "_trusted_network(ip, _MAX_TRUSTED_WIDTH_PREFIX)" in moon_runner
 assert "port: 7125" in moon_runner
 assert "provider: none" in moon_runner
 assert "klippy_uds_address: {klippy_socket}" in moon_runner
-assert 'if not os.path.exists(p["moonraker_config"])' in moon_runner
+assert 'if not os.path.exists(path)' in moon_runner
+# moonraker.conf stays user-owned: only the marked block / untouched generated files are rewritten.
+assert "androidklipper-managed:authorization" in moon_runner
+assert 'return "user_owned"' in moon_runner
+assert "def sync_config_file(" in moon_runner
 assert 'variables_config = os.path.join(p["config_dir"], "variables.cfg")' not in moon_runner
 assert "Do not seed printer-side config files" in moon_runner
-assert "Never regenerate moonraker.conf" in moon_runner
+assert "The persistent config directory stays user-owned" in moon_runner
 assert "server.android_request_stop()" in moon_runner
 
 assert "persistent_host" in host_service

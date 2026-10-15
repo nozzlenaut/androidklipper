@@ -3,8 +3,6 @@ package dev.nozzlenaut.androidklipper
 import android.content.Context
 import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.net.URLDecoder
 
 class MainsailServer(
@@ -50,9 +48,10 @@ class MainsailServer(
         }
 
         if (uri.substringBefore('?') == "/config.json") {
-            val requestHost = session.headers["host"]
-                ?.substringBefore(':')
-                ?.takeIf { it.isNotBlank() }
+            // The Host header is attacker-controlled and is written into JSON
+            // below, so only accept a plain host name / IP and otherwise fall
+            // back to the device's own LAN address.
+            val requestHost = LanAddress.sanitizeHost(session.headers["host"])
             val hostname = requestHost ?: activeLanIpv4() ?: "127.0.0.1"
             val json = """
                 {
@@ -123,19 +122,5 @@ class MainsailServer(
         else -> "application/octet-stream"
     }
 
-    private fun activeLanIpv4(): String? {
-        return runCatching {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .asSequence()
-                .filter { it.isUp && !it.isLoopback }
-                .flatMap { it.inetAddresses.toList().asSequence() }
-                .filterIsInstance<Inet4Address>()
-                .map { it.hostAddress }
-                .firstOrNull { address ->
-                    address.startsWith("10.") ||
-                        address.startsWith("192.168.") ||
-                        address.matches(Regex("""172\.(1[6-9]|2\d|3[01])\..*"""))
-                }
-        }.getOrNull()
-    }
+    private fun activeLanIpv4(): String? = LanAddress.current()?.ip
 }

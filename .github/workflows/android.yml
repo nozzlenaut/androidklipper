@@ -165,7 +165,7 @@ jobs:
 
       - name: Script tests
         run: |
-          python3 -m pip install pyyaml
+          python3 -m pip install pyyaml tornado importlib_metadata
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Native PTY bridge tests
