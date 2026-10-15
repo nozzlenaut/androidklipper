@@ -22,6 +22,14 @@ class UsbSerialSession(
 ) : SerialInputOutputManager.Listener, AutoCloseable {
 
     private val running = AtomicBoolean(false)
+
+    /** True once the session died on its own (error or unplug), as opposed to close(). */
+    @Volatile
+    var hasFailed: Boolean = false
+        private set
+
+    /** Android's device path (/dev/bus/usb/BBB/DDD), used to match detach broadcasts. */
+    val deviceName: String get() = driver.device.deviceName
     private var port: UsbSerialPort? = null
     private var ioManager: SerialInputOutputManager? = null
     private var usbReader: Thread? = null
@@ -89,14 +97,18 @@ class UsbSerialSession(
         usbReader = Thread({
             setUsbIoPriority()
             val buffer = ByteArray(BUFFER_SIZE)
+            val health = UsbReadHealth(READ_TIMEOUT_MS)
             while (running.get()) {
                 try {
+                    val startedNs = System.nanoTime()
                     val n = connection.bulkTransfer(
                         readEndpoint,
                         buffer,
                         buffer.size,
                         READ_TIMEOUT_MS
                     )
+                    val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L
+                    val verdict = health.onTransfer(n, elapsedMs, SystemClock.elapsedRealtime())
                     when {
                         n > 0 -> {
                             rxBytes.addAndGet(n.toLong())
@@ -106,9 +118,17 @@ class UsbSerialSession(
                             // Android reports both an idle timeout and a real USB
                             // failure as -1. A read-side -1 by itself is therefore
                             // not enough evidence to tear down a healthy Klipper
-                            // session. The write path has a bounded retry window and
-                            // Klipper itself detects a genuinely silent MCU.
+                            // session: an idle line waits out the timeout, so only
+                            // a long unbroken run of *immediate* failures (no data,
+                            // no timeout) is treated as a dead device. Normally the
+                            // ACTION_USB_DEVICE_DETACHED receiver gets there first.
                             readRetryCount.incrementAndGet()
+                            if (verdict == UsbReadHealth.Verdict.DEAD) {
+                                throw IOException(
+                                    "USB read endpoint failing immediately for " +
+                                        "${UsbReadHealth.DEFAULT_DEAD_AFTER_MS} ms; device likely unplugged"
+                                )
+                            }
                             Thread.sleep(READ_RETRY_BACKOFF_MS)
                         }
                     }
@@ -225,8 +245,14 @@ class UsbSerialSession(
         }
     }
 
+    /** Android reported this device unplugged: end the session now, loudly. */
+    fun markDetached() {
+        failSession("USB device detached", IOException("$deviceName was unplugged"))
+    }
+
     private fun failSession(prefix: String, cause: Throwable) {
         if (!running.compareAndSet(true, false)) return
+        hasFailed = true
         onError(withStats(prefix, cause))
         usbReader?.let { if (it !== Thread.currentThread()) it.interrupt() }
         ptyReader?.let { if (it !== Thread.currentThread()) it.interrupt() }

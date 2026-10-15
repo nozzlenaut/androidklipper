@@ -441,3 +441,16 @@ if vendored.exists():
     assert (vendored / "KLIPPER_VERSION").read_text().strip() == "v0.13.0-756-g2d7717e3"
 
 print("project invariants: PASS")
+
+# USB loss handling: detach is observed, recovery is policy-driven, identities are never crossed.
+host_service_src = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/KlipperHostService.kt").read_text()
+usb_session_src = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/usb/UsbSerialSession.kt").read_text()
+assert "ACTION_USB_DEVICE_DETACHED" in host_service_src
+assert "stableIds.forget(" in host_service_src
+assert "UsbRecoveryPolicy.decide(" in host_service_src
+assert "ambiguous USB identity" in host_service_src
+assert "awaitHostStopped(" in host_service_src
+assert "UsbReadHealth(" in usb_session_src
+assert "fun markDetached()" in usb_session_src
+# A duplicate attach must still be able to resolve to IGNORE (never an unconditional rebuild).
+assert "Decision.IGNORE" in host_service_src

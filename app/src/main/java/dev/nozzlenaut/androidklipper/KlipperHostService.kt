@@ -4,18 +4,25 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import android.os.Process
+import android.provider.Settings
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import dev.nozzlenaut.androidklipper.pty.PtyBridge
 import dev.nozzlenaut.androidklipper.usb.UsbDeviceScanner
+import dev.nozzlenaut.androidklipper.usb.UsbRecoveryPolicy
+import dev.nozzlenaut.androidklipper.usb.UsbStableIds
 import dev.nozzlenaut.androidklipper.usb.UsbSerialSession
 import dev.nozzlenaut.androidklipper.usb.UsbPermissionReceiver
 import java.io.File
@@ -52,6 +59,41 @@ class KlipperHostService : Service() {
     }
     private val persistentHostActive = AtomicBoolean(false)
     private val firmwareRestartRecoveryPending = AtomicBoolean(false)
+    private val rebuildInProgress = AtomicBoolean(false)
+    private var usbDetachReceiverRegistered = false
+    private val usbDetachReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != UsbManager.ACTION_USB_DEVICE_DETACHED) return
+            @Suppress("DEPRECATION")
+            val device: UsbDevice? = if (Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+            } else {
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+            }
+            if (device != null) onUsbDeviceDetached(device)
+        }
+    }
+
+    // Path-keyed memory of USB serials (see UsbStableIds for why entries are
+    // epoch-tagged and dropped on detach).
+    private val stableIds by lazy {
+        val prefs = getSharedPreferences("usb_stable_ids", Context.MODE_PRIVATE)
+        val bootCount = runCatching {
+            Settings.Global.getInt(contentResolver, Settings.Global.BOOT_COUNT)
+        }.getOrNull()
+        UsbStableIds(
+            object : UsbStableIds.Store {
+                override fun get(deviceName: String) = prefs.getString(deviceName, null)
+                override fun put(deviceName: String, value: String) {
+                    prefs.edit().putString(deviceName, value).apply()
+                }
+                override fun remove(deviceName: String) {
+                    prefs.edit().remove(deviceName).apply()
+                }
+            },
+            epoch = bootCount?.toString() ?: "unknown"
+        )
+    }
     private val servicePrefs by lazy {
         getSharedPreferences(PREF_SERVICE_STATE, Context.MODE_PRIVATE)
     }
@@ -64,8 +106,13 @@ class KlipperHostService : Service() {
         HostDiagnostics.log(this, "service onCreate")
         HostDiagnostics.recordPreviousProcessExits(this)
         createNotificationChannel()
-        runCatching { statusServer.start() }
-        runCatching { mainsailServer.startServer() }
+        runCatching { statusServer.start() }.onFailure {
+            HostDiagnostics.log(this, "status server FAILED to start: ${it.javaClass.simpleName}: ${it.message}")
+        }
+        runCatching { mainsailServer.startServer() }.onFailure {
+            HostDiagnostics.log(this, "Mainsail server FAILED to start: ${it.javaClass.simpleName}: ${it.message}")
+        }
+        registerUsbDetachReceiver()
         watchdogExecutor.scheduleAtFixedRate(
             { logHeartbeat() },
             30,
@@ -95,7 +142,28 @@ class KlipperHostService : Service() {
         // A second USB attach/permission callback must never tear down a live print.
         // v249 rebuilt the whole host on every service start, and rebuildSessions()
         // deliberately stops Klippy/Moonraker before reopening USB.
-        if (persistentHostActive.get()) {
+        //
+        // The one exception is a host that provably cannot be printing: a bridged
+        // USB device died (unplugged), or Klippy is not ready and a supported
+        // device without a session has appeared. Then the next attach rebuilds.
+        val decision = if (realConfig) {
+            UsbRecoveryPolicy.decide(
+                hostActive = persistentHostActive.get(),
+                rebuildInProgress = rebuildInProgress.get(),
+                klippyReady = isKlippyReady(this),
+                anySessionFailed = sessions.any { it.hasFailed },
+                grantedSupportedDevices = usbManager.deviceList.values.count {
+                    UsbDeviceScanner.isSupported(it) && usbManager.hasPermission(it)
+                },
+                sessionCount = sessions.size
+            )
+        } else if (persistentHostActive.get()) {
+            UsbRecoveryPolicy.Decision.IGNORE
+        } else {
+            UsbRecoveryPolicy.Decision.START_HOST
+        }
+        HostDiagnostics.log(this, "start decision=$decision")
+        if (decision == UsbRecoveryPolicy.Decision.IGNORE) {
             HostDiagnostics.log(
                 this,
                 "start ignored: persistent host is already starting/running"
@@ -106,6 +174,7 @@ class KlipperHostService : Service() {
             setMoonrakerReady(false)
             setKlippyReady(false)
             persistentHostActive.set(true)
+            rebuildInProgress.set(true)
         }
 
         hostExecutor.execute {
@@ -113,6 +182,7 @@ class KlipperHostService : Service() {
                 rebuildSessions(fullSmoke, realConfig)
             } catch (t: Throwable) {
                 if (realConfig) persistentHostActive.set(false)
+                rebuildInProgress.set(false)
                 HostDiagnostics.log(
                     this,
                     "rebuildSessions ERROR ${t.javaClass.simpleName}: ${t.message}"
@@ -123,7 +193,87 @@ class KlipperHostService : Service() {
         return if (realConfig) START_STICKY else START_NOT_STICKY
     }
 
+    private fun registerUsbDetachReceiver() {
+        val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(usbDetachReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(usbDetachReceiver, filter)
+            }
+            usbDetachReceiverRegistered = true
+        }.onFailure {
+            HostDiagnostics.log(this, "USB detach receiver FAILED to register: ${it.message}")
+        }
+    }
+
+    private fun unregisterUsbDetachReceiver() {
+        if (!usbDetachReceiverRegistered) return
+        runCatching { unregisterReceiver(usbDetachReceiver) }
+        usbDetachReceiverRegistered = false
+    }
+
+    /**
+     * Android says a USB device was unplugged. End its bridge now instead of
+     * waiting for a failed write, and forget its remembered serial because the
+     * device path may be reused by a different board.
+     *
+     * This deliberately does not restart anything: a print that lost an MCU
+     * cannot be resumed. The next USB attach rebuilds (see UsbRecoveryPolicy).
+     */
+    private fun onUsbDeviceDetached(device: UsbDevice) {
+        stableIds.forget(device.deviceName)
+        val affected = sessions.filter { it.deviceName == device.deviceName }
+        HostDiagnostics.log(
+            this,
+            "USB device detached ${device.deviceName} bridgedSessions=${affected.size}"
+        )
+        if (affected.isEmpty()) return
+        affected.forEach { it.markDetached() }
+        publishStatus(
+            "USB device unplugged (${affected.joinToString { it.stableId }}). " +
+                "Klippy will report lost communication and a running print cannot be resumed. " +
+                "Reconnect the cable; the host recovers when the device reappears."
+        )
+    }
+
+    /** Ask every session to stop first so they wind down in parallel, then close in order. */
+    private fun stopAndCloseSessions() {
+        sessions.forEach { it.requestStop() }
+        sessions.forEach { runCatching { it.close() } }
+        sessions.clear()
+    }
+
+    /** Waits (bounded) for the Klippy and Moonraker workers to report that they returned. */
+    private fun awaitHostStopped(python: Python) {
+        val deadline = SystemClock.elapsedRealtime() + HOST_STOP_WAIT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val klippy = runCatching {
+                python.getModule("persistent_host").callAttr("get_status").toString()
+            }.getOrDefault("stopped")
+            val moonraker = runCatching {
+                python.getModule("moonraker_runner").callAttr("get_status").toString()
+            }.getOrDefault("stopped")
+            if (klippy.startsWith("stopped") &&
+                (moonraker.startsWith("stopped") || moonraker.startsWith("error"))
+            ) {
+                return
+            }
+            Thread.sleep(HOST_STOP_POLL_MS)
+        }
+        HostDiagnostics.log(this, "awaitHostStopped timed out after ${HOST_STOP_WAIT_MS} ms; continuing")
+    }
+
     private fun rebuildSessions(fullSmoke: Boolean, realConfig: Boolean) {
+        rebuildInProgress.set(true)
+        try {
+            rebuildSessionsLocked(fullSmoke, realConfig)
+        } finally {
+            rebuildInProgress.set(false)
+        }
+    }
+
+    private fun rebuildSessionsLocked(fullSmoke: Boolean, realConfig: Boolean) {
         HostDiagnostics.log(
             this,
             "rebuildSessions begin fullSmoke=$fullSmoke realConfig=$realConfig sessions=${sessions.size}"
@@ -134,14 +284,17 @@ class KlipperHostService : Service() {
             val python = Python.getInstance()
             runCatching { python.getModule("moonraker_runner").callAttr("stop") }
             runCatching { python.getModule("persistent_host").callAttr("stop") }
+            // stop() only requests shutdown. Wait until the old Klippy/Moonraker
+            // workers have really returned, otherwise the new host can see the
+            // old one's API socket and status and report a stale state.
+            awaitHostStopped(python)
         }
 
         // Close first, then give Android a moment to release the CDC interfaces.
         // Sleeping before close does not help a kernel/USB stack that is still
         // unwinding the old claims after UsbDeviceConnection.close().
         val hadSessions = sessions.isNotEmpty()
-        sessions.forEach { runCatching { it.close() } }
-        sessions.clear()
+        stopAndCloseSessions()
         if (hadSessions) Thread.sleep(USB_REOPEN_SETTLE_MS)
         if (!realConfig) releaseHostWakeLock()
 
@@ -172,29 +325,67 @@ class KlipperHostService : Service() {
             device to driver
         }
 
-        supported.forEachIndexed { index, (device, driver) ->
+        // Phase 1: open every device and work out its stable ID.
+        class OpenedDevice(
+            val device: UsbDevice,
+            val driver: com.hoho.android.usbserial.driver.UsbSerialDriver,
+            val connection: UsbDeviceConnection,
+            val resolution: UsbStableIds.Resolution
+        )
+
+        val opened = mutableListOf<OpenedDevice>()
+        supported.forEach { (device, driver) ->
             try {
                 val connection = usbManager.openDevice(device)
                     ?: error("UsbManager.openDevice returned null")
                 // Fire OS can intermittently stop exposing one MCU serial after
-                // the CDC device has been reopened. Cache every successful stable ID
-                // by the current USB device path so subsequent opens in the same USB
-                // enumeration keep the real Klipper serial instead of degrading to a
-                // VID:PID:path fallback.
-                val stableIdPrefs = getSharedPreferences("usb_stable_ids", Context.MODE_PRIVATE)
-                val cacheKey = device.deviceName
+                // the CDC device has been reopened; UsbStableIds remembers the last
+                // serial per USB path, but only within the same boot and until the
+                // device is unplugged (a path can be reused by a different board).
                 val serial = runCatching { device.serialNumber }.getOrNull()
                     ?.takeIf { it.isNotBlank() }
                     ?: runCatching { connection.serial }.getOrNull()
                         ?.takeIf { it.isNotBlank() }
-                val stableId = if (serial != null) {
-                    stableIdPrefs.edit().putString(cacheKey, serial).apply()
-                    serial
-                } else {
-                    stableIdPrefs.getString(cacheKey, null)
-                        ?.takeIf { it.isNotBlank() }
-                        ?: "%04x:%04x:%s".format(device.vendorId, device.productId, device.deviceName)
+                val resolution = stableIds.resolve(
+                    UsbStableIds.Candidate(device.deviceName, device.vendorId, device.productId, serial)
+                )
+                if (resolution.source != UsbStableIds.Source.SERIAL) {
+                    HostDiagnostics.log(
+                        this,
+                        "USB identity for ${device.deviceName} is ${resolution.source} (${resolution.id}); " +
+                            "the device did not report a serial"
+                    )
                 }
+                opened += OpenedDevice(device, driver, connection, resolution)
+            } catch (t: Throwable) {
+                statusLines += "${device.productName ?: device.deviceName}: ERROR ${t.javaClass.simpleName}: ${t.message}"
+            }
+        }
+
+        // Two devices must never share an ID: that is what a stale remembered
+        // serial looks like with two identical boards. Refuse to bridge any of
+        // them (and, below, to start Klippy) instead of silently crossing MCUs.
+        val ambiguousIds = UsbStableIds.duplicates(opened.map { it.resolution })
+        val toBridge = opened.filter { o ->
+            val clash = ambiguousIds[o.resolution.id]
+            if (clash != null) {
+                runCatching { o.connection.close() }
+                statusLines += "${o.device.productName ?: o.device.deviceName}: ERROR ambiguous USB identity " +
+                    "'${o.resolution.id}' is claimed by ${clash.joinToString(", ")}. Unplug and replug the " +
+                    "boards one at a time; not bridging this device."
+                false
+            } else {
+                true
+            }
+        }
+
+        // Phase 2: bridge each device.
+        toBridge.forEachIndexed { index, entry ->
+            val device = entry.device
+            val driver = entry.driver
+            val connection = entry.connection
+            val stableId = entry.resolution.id
+            try {
                 val pty = PtyBridge.create()
                 val session = UsbSerialSession(driver, connection, stableId, pty) { error ->
                     HostDiagnostics.log(
@@ -252,6 +443,9 @@ class KlipperHostService : Service() {
             val missingIncludes =
                 if (configPath.exists()) missingConfigIncludes(configPath) else null
             when {
+                ambiguousIds.isNotEmpty() -> {
+                    statusLines += "Klippy WAITING: ambiguous USB identity (see above); not starting with a possibly crossed MCU mapping."
+                }
                 stablePtyMap.isEmpty() -> {
                     statusLines += "Klippy WAITING: no USB serial device completed a Klipper identify handshake."
                 }
@@ -543,8 +737,7 @@ class KlipperHostService : Service() {
                 // Klippy deliberately returned before Android's physical USB
                 // sessions are rebuilt. At this point there is no live print to
                 // preserve: FIRMWARE_RESTART has already ended the Klippy runtime.
-                sessions.forEach { runCatching { it.close() } }
-                sessions.clear()
+                stopAndCloseSessions()
                 Thread.sleep(FIRMWARE_REENUM_SETTLE_MS)
 
                 val deadline = SystemClock.elapsedRealtime() + FIRMWARE_REENUM_TIMEOUT_MS
@@ -760,8 +953,8 @@ class KlipperHostService : Service() {
             runCatching { python.getModule("moonraker_runner").callAttr("stop") }
             runCatching { python.getModule("persistent_host").callAttr("stop") }
         }
-        sessions.forEach { runCatching { it.close() } }
-        sessions.clear()
+        unregisterUsbDetachReceiver()
+        stopAndCloseSessions()
         watchdogExecutor.shutdownNow()
         hostExecutor.shutdownNow()
         moonrakerExecutor.shutdownNow()
@@ -788,6 +981,8 @@ class KlipperHostService : Service() {
         private const val KEY_DESIRED_REAL_HOST = "desired_real_host"
         private const val KEY_MOONRAKER_READY = "moonraker_ready"
         private const val KEY_KLIPPY_READY = "klippy_ready"
+        private const val HOST_STOP_WAIT_MS = 15_000L
+        private const val HOST_STOP_POLL_MS = 200L
         private const val CHANNEL_ID = "klipper_host"
         private const val NOTIFICATION_ID = 7714
         private const val USB_REOPEN_SETTLE_MS = 250L
