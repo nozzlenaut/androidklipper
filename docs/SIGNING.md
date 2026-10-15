@@ -38,6 +38,6 @@ Keep a private offline copy of `debug.keystore`.
 
 The cached key cannot be extracted safely (publishing it as an artifact on a
 public repo would let anyone sign updates for this app id). Switching to a new
-key therefore needs one reinstall on each device. Export the printer config and
-database first (Mainsail: Machine tab for config files; Moonraker database
-backup) because uninstalling erases `AndroidKlipperDrive`.
+key therefore needs one reinstall on each device. Back up first (see
+`docs/BACKUP.md`; stop the host so the database is included) because
+uninstalling erases `AndroidKlipperDrive`, then restore after reinstalling.

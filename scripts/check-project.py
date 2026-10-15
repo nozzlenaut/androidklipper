@@ -469,3 +469,12 @@ assert "hostGeneration.get() == generation" in waiter_src
 assert "hostGeneration.incrementAndGet()" in host_service_src
 assert "RestartBackoff()" in host_service_src
 assert "runMoonrakerSupervised(generation)" in host_service_src
+
+# Backup/restore: only known drive folders, validated and staged before anything is replaced.
+backup_src = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/backup/PrinterDataBackup.kt").read_text()
+assert 'ALLOWED_TOP_LEVEL = setOf("config", "database", "gcodes")' in backup_src
+assert '"logs"' not in backup_src and '"comms"' not in backup_src
+assert "extractValidated(" in backup_src and "swapIn(" in backup_src
+assert "pre-restore-" in backup_src
+backup_runner_src = (root / "app/src/main/java/dev/nozzlenaut/androidklipper/backup/BackupRunner.kt").read_text()
+assert "restore REFUSED" in backup_runner_src  # never restore under a running host
