@@ -317,6 +317,9 @@ def run(work_dir, lan_hint=None):
     os.environ["MOONRAKER_ENABLE_UVLOOP"] = "n"
 
     from moonraker import server
+    # Extend Moonraker's component search path before plugin discovery.
+    from extension_manager import activate as activate_extensions
+    activate_extensions(os.path.join(p["data_root"], "extensions"), "moonraker.components")
 
     argv = [
         "moonraker",
