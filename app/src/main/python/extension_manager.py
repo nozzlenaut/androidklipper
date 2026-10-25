@@ -98,7 +98,7 @@ def install_archive(extensions_dir, extension_id, archive_path, version="unverif
                 if total > MAX_UNCOMPRESSED_BYTES:
                     raise ExtensionError("extracted files exceed size limit")
                 selected.append((entry, target))
-            names = [str(target.relative_to(stage)) for _, target in selected]
+            names = [target.relative_to(stage).as_posix() for _, target in selected]
             if len(names) != len(set(names)):
                 raise ExtensionError("duplicate file in archive")
             missing = set(spec["required"]) - set(names)
