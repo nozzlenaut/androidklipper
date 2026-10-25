@@ -1,0 +1,12 @@
+--- a/app/src/main/python/moonraker_runner.py
++++ b/app/src/main/python/moonraker_runner.py
+@@ -317,6 +317,9 @@
+     os.environ["MOONRAKER_ENABLE_UVLOOP"] = "n"
+ 
+     from moonraker import server
++    # Extend Moonraker's component search path before plugin discovery.
++    from extension_manager import activate as activate_extensions
++    activate_extensions(os.path.join(p["data_root"], "extensions"), "moonraker.components")
+ 
+     argv = [
+         "moonraker",
