@@ -47,6 +47,7 @@ android {
 
     buildTypes {
         getByName("debug") {
+            applicationIdSuffix = ".mototest"
             signingConfig = signingConfigs.getByName("debug")
         }
     }
