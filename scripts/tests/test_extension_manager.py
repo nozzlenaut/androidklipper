@@ -75,6 +75,26 @@ class HappyHareStagingTests(unittest.TestCase):
             else:
                 sys.modules["extras"] = original
 
+    def test_moonraker_component_import(self):
+        manager.install_archive(self.extensions, "happy_hare", self.source)
+        old = {key: sys.modules.get(key) for key in ("moonraker", "moonraker.components")}
+        root = types.ModuleType("moonraker")
+        root.__path__ = []
+        components = types.ModuleType("moonraker.components")
+        components.__path__ = []
+        sys.modules["moonraker"] = root
+        sys.modules["moonraker.components"] = components
+        try:
+            self.assertEqual(manager.activate(self.extensions, "moonraker.components"), ["happy_hare"])
+            self.assertTrue(importlib.import_module("moonraker.components.mmu_server").READY)
+        finally:
+            sys.modules.pop("moonraker.components.mmu_server", None)
+            for key, previous in old.items():
+                if previous is None:
+                    sys.modules.pop(key, None)
+                else:
+                    sys.modules[key] = previous
+
     def test_disabled_extension_not_activated(self):
         manager.install_archive(self.extensions, "happy_hare", self.source)
         path = self.extensions / "happy_hare/extension.json"
