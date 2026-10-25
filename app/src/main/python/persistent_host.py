@@ -99,6 +99,10 @@ def run(stable_mapping, c_helper_path, work_dir, device_name):
     os.environ["ANDROID_KLIPPER_CHELPER"] = c_helper_path
     os.environ["ANDROID_KLIPPER_SERIAL_MAP"] = str(stable_mapping)
     _klippy_path()
+    # Activated only for extensions explicitly installed in app-private storage.
+    # This must happen before Klippy discovers [mmu] or other extras.
+    from extension_manager import activate as activate_extensions
+    activate_extensions(os.path.join(work_dir, "printer_data", "extensions"), "extras")
     import klippy
     import reactor
 
