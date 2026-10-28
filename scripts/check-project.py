@@ -14,6 +14,7 @@ required = [
     "scripts/vendor-klipper.sh",
     "scripts/patch-moonraker.py",
     "scripts/vendor-moonraker.sh",
+    "scripts/vendor-happy-hare.sh",
     "scripts/capture-runtime-checkpoint.py",
     "app/src/main/python/persistent_host.py",
     "app/src/main/python/moonraker_runner.py",
