@@ -22,6 +22,20 @@ do
   unzip -Z1 "$TMP/app.imy" | grep -Fxq "$required"
 done
 
+# Happy Hare v4 modules must be inside the APK, not just present in the build tree.
+for required in \
+  extras/mmu_machine.pyc \
+  extras/mmu_stepper.pyc \
+  extras/mmu_servo.pyc \
+  extras/mmu/mmu_controller.pyc \
+  extras/mmu/unit/selectors/mmu_servo_selector.pyc \
+  moonraker/components/mmu_server.pyc; do
+  unzip -Z1 "$TMP/app.imy" | grep -Fxq "$required" || {
+    echo "Missing Happy Hare module in APK: $required" >&2
+    exit 1
+  }
+done
+
 for abi in arm64-v8a armeabi-v7a; do
   unzip -p "$APK" "assets/chaquopy/stdlib-$abi.imy" > "$TMP/stdlib-$abi.imy"
   for module in fcntl termios select; do

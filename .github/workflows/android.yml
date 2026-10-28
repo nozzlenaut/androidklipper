@@ -22,6 +22,7 @@ jobs:
     steps:
       # Keep one existing APK. GitHub quota accounting can lag deleted artifacts by hours.
       - name: Clean old Android build artifacts
+        if: github.event_name != 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -160,12 +161,15 @@ jobs:
       - name: Vendor pinned Moonraker
         run: bash scripts/vendor-moonraker.sh
 
+      - name: Vendor pinned Happy Hare (opt-in MMU support)
+        run: bash scripts/vendor-happy-hare.sh
+
       - name: Static project checks
         run: python3 scripts/check-project.py
 
       - name: Script tests
         run: |
-          python3 -m pip install pyyaml tornado importlib_metadata
+          python3 -m pip install pyyaml tornado importlib_metadata pyserial Jinja2 cffi
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Native PTY bridge tests
